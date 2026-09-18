@@ -13,6 +13,7 @@ class ConstraintDef:
     template: Template
     activation_activity: str
     target_activity: str | None = None
+    count: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

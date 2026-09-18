@@ -6,4 +6,4 @@ from enum import Enum
 
 
 class Template(Enum):
-    PRECEDENCE = "precedence"
+    Existence = "existence"
