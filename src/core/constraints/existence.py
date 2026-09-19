@@ -14,7 +14,10 @@ class ExistenceInstance:
         self.definition = definition
         self._count: int = 0
 
-    def handle_event(self, event: Event) -> None:
+    def check(self, event: Event) -> bool:
+        return True
+
+    def commit(self, event: Event) -> None:
         d = self.definition
         if event.activity == d.activation_activity:  # Add activation constraint later
             self._count += 1

@@ -18,18 +18,30 @@ class Violation:
     event: Event | None
 
 
+@dataclass(frozen=True, slots=True)
+class Decision:
+    allowed: bool
+    violations: tuple[Violation, ...]
+
+
 class TraceMonitor:
     def __init__(self, model: MPDeclareModel):
         self.model = model
         self.instances = [build_instance(d) for d in model.constraints]
 
-    def handle_event(self, event: Event) -> list[Violation]:
-        indices = self.model.activity_index.get(event.activity())
+    def check(self, event: Event) -> Decision:
+        indices = self.model.activity_index.get(event.activity(), ())
+        violations = [
+            Violation(constraint_id=self.instances[i].definition.id)
+            for i in indices
+            if not self.instances[i].check(event)
+        ]
+        return Decision(allowed=not violations, violations=tuple(violations))
+
+    def commit(self, event: Event) -> None:
+        indices = self.model.activity_index.get(event.activity(), ())
         for i in indices:
-            self.instances[i].handle_event(event)
-            res = self.instances[i].verdict()
-            print(res)
-            # TODO: Add logging for accepted / rejected events
+            self.instances[i].commit(event)
 
     def analyze(self) -> list[Violation]:
         return [

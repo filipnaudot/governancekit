@@ -14,8 +14,11 @@ class Verdict(Enum):
 
 
 class ConstraintInstance(Protocol):
-    def handle_event(self, event: Event) -> None:
-        pass
+    def check(self, event: Event) -> bool:
+        """Checks if the event is acceptable according to the constraint"""
+
+    def commit(self, event: Event) -> None:
+        """Records that the specified event has been executed"""
 
     def verdict(self) -> Verdict:
-        pass
+        """Current status: SATISFIED / VIOLATED"""
