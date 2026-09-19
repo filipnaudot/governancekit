@@ -52,7 +52,9 @@ def parse_decl_text(text: str) -> list[ConstraintDef]:
         ) = match.groups()
 
         template = _parse_template(template_name)
-        activation_activity, target_activity, count = _parse_bracket_body(bracket_body)
+        activation_activity, target_activity, count = _parse_bracket_body(
+            bracket_body, activities
+        )
         definitions.append(
             ConstraintDef(
                 id=f"{template.value}_{len(definitions)}",
@@ -62,6 +64,8 @@ def parse_decl_text(text: str) -> list[ConstraintDef]:
                 count=count,
             )
         )
+
+    return definitions
 
 
 def _parse_activity(line: str, activities: set[str]) -> None:
@@ -84,7 +88,9 @@ def _parse_template(template_name: str):
     return Template[template_name.strip().upper().replace(" ", "_")]
 
 
-def _parse_bracket_body(bracket_body: str) -> tuple[str, str | None, int | None]:
+def _parse_bracket_body(
+    bracket_body: str, activities: set[str]
+) -> tuple[str, str | None, int | None]:
     bracket_items = [item.strip() for item in bracket_body.split(",")]
 
     if not 1 <= len(bracket_items) <= 2:
@@ -93,6 +99,8 @@ def _parse_bracket_body(bracket_body: str) -> tuple[str, str | None, int | None]
         )
 
     activation = bracket_items[0]
+    if activation not in activities:
+        raise (ValueError(f"undeclared activity {activation!r} in {bracket_body!r}"))
     if len(bracket_items) == 1:
         return activation, None, None
 
@@ -100,6 +108,8 @@ def _parse_bracket_body(bracket_body: str) -> tuple[str, str | None, int | None]
     if second.isdigit():
         return activation, None, int(second)
 
+    if second not in activities:
+        raise (ValueError(f"undeclared activity {second!r} in {bracket_body!r}"))
     return activation, second, None
 
 
