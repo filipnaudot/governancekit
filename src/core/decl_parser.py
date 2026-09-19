@@ -14,6 +14,21 @@ For a line "Constraint[A, B] | ActCond | CorrCond | Deadline" it filters:
 """
 _CONSTRAINT_LINE = re.compile(r"^([^\[]+)\[([^\]]+)\]\s*\|([^|]*)\|([^|]*)\|(.*)$")
 
+"""
+Position of activation activity within the bracket body of a constraint
+"""
+_ACTIVATION_ARG = {
+    Template.EXISTENCE: 0,
+    Template.PRECEDENCE: 1,
+}
+
+"""
+Unary constraints
+"""
+_UNARY = {
+    Template.EXISTENCE,
+}
+
 
 def parse_decl_text(text: str) -> list[ConstraintDef]:
     activities: set[str] = set()
@@ -53,7 +68,7 @@ def parse_decl_text(text: str) -> list[ConstraintDef]:
 
         template = _parse_template(template_name)
         activation_activity, target_activity, count = _parse_bracket_body(
-            bracket_body, activities
+            template, bracket_body, activities
         )
         definitions.append(
             ConstraintDef(
@@ -89,7 +104,7 @@ def _parse_template(template_name: str):
 
 
 def _parse_bracket_body(
-    bracket_body: str, activities: set[str]
+    template: Template, bracket_body: str, activities: set[str]
 ) -> tuple[str, str | None, int | None]:
     bracket_items = [item.strip() for item in bracket_body.split(",")]
 
@@ -98,19 +113,21 @@ def _parse_bracket_body(
             f"expected 1 or 2 items, got {len(bracket_items)}: {bracket_body!r}"
         )
 
-    activation = bracket_items[0]
-    if activation not in activities:
-        raise (ValueError(f"undeclared activity {activation!r} in {bracket_body!r}"))
-    if len(bracket_items) == 1:
-        return activation, None, None
+    if template in _UNARY:
+        activity = _require_declared_activity(
+            bracket_items[0], activities, bracket_body
+        )
+        count = int(bracket_items[1]) if len(bracket_items) == 2 else None
+        return activity, None, count
 
-    second = bracket_items[1]
-    if second.isdigit():
-        return activation, None, int(second)
+    if len(bracket_items != 2):
+        raise ValueError(f"{template} requires 2 activities: {bracket_body!r}")
 
-    if second not in activities:
-        raise (ValueError(f"undeclared activity {second!r} in {bracket_body!r}"))
-    return activation, second, None
+    for item in bracket_items:
+        _require_declared_activity(item, activities, bracket_body)
+
+    activation_index = _ACTIVATION_ARG.get(template, 0)
+    return bracket_items[activation_index], bracket_items[1 - activation_index], None
 
 
 def _parse_activity_condition(activity_condition: str) -> None:
@@ -123,3 +140,11 @@ def _parse_correlation_condition(correlation_condition: str) -> None:
 
 def _parse_deadline(deadline: str) -> None:
     pass
+
+
+def _require_declared_activity(
+    activity: str, activities: set[str], context: str
+) -> str:
+    if activity not in activities:
+        raise (ValueError(f"undeclared activity {activity!r} in {context!r}"))
+    return activity

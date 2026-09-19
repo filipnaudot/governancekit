@@ -7,3 +7,4 @@ from enum import Enum
 
 class Template(Enum):
     EXISTENCE = "existence"
+    PRECEDENCE = "precedence"
