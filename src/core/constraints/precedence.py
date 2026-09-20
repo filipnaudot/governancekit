@@ -14,6 +14,7 @@ class PrecedenceInstance:
     def __init__(self, definition: ConstraintDef):
         self.definition = definition
         self._target_seen = False
+        self._violated = False
 
     def check(self, event: Event) -> bool:
         if event.activity != self.definition.activation_activity:
@@ -21,8 +22,11 @@ class PrecedenceInstance:
         return self._target_seen
 
     def commit(self, event: Event) -> None:
-        if event.activity == self.definition.target_activity:
+        d = self.definition
+        if event.activity == d.target_activity:
             self._target_seen = True
+        elif event.activity == d.activation_activity and not self._target_seen:
+            self._violated = True
 
     def verdict(self) -> Verdict:
-        return Verdict.SATISFIED
+        return Verdict.VIOLATED if self._violated else Verdict.SATISFIED

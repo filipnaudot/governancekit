@@ -7,3 +7,5 @@ dependencies = []
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = ["benchmark: performance tests"]
+addopts = "-m 'not benchmark'"

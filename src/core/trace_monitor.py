@@ -30,16 +30,16 @@ class TraceMonitor:
         self.instances = [build_instance(d) for d in model.constraints]
 
     def check(self, event: Event) -> Decision:
-        indices = self.model.activity_index.get(event.activity(), ())
+        indices = self.model.activity_index.get(event.activity, ())
         violations = [
-            Violation(constraint_id=self.instances[i].definition.id)
+            Violation(constraint_id=self.instances[i].definition.id, event=event)
             for i in indices
             if not self.instances[i].check(event)
         ]
         return Decision(allowed=not violations, violations=tuple(violations))
 
     def commit(self, event: Event) -> None:
-        indices = self.model.activity_index.get(event.activity(), ())
+        indices = self.model.activity_index.get(event.activity, ())
         for i in indices:
             self.instances[i].commit(event)
 

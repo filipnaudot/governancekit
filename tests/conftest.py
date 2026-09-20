@@ -6,3 +6,12 @@ def existence_def(activation: str, id: str) -> ConstraintDef:
     return ConstraintDef(
         id=id, template=Template.EXISTENCE, activation_activity=activation, count=1
     )
+
+
+def precedence_def(activation: str, target: str, id: str) -> ConstraintDef:
+    return ConstraintDef(
+        id=id,
+        template=Template.PRECEDENCE,
+        activation_activity=activation,
+        target_activity=target,
+    )
