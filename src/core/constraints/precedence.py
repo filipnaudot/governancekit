@@ -1,7 +1,7 @@
 """
 MP-DECLARE Existence constraint
 
-Satisfied if specified activity appears n times in a trace (default n = 1)
+An activation arriving with no prior target is a permanent violation.
 """
 
 from core.constraints.base import Verdict
@@ -9,20 +9,20 @@ from core.events import Event
 from core.mp_declare_model import ConstraintDef
 
 
-class ExistenceInstance:
+class PrecedenceInstance:
     # TODO: Implement handling of MP DECLARE conditions
     def __init__(self, definition: ConstraintDef):
         self.definition = definition
-        self._count: int = 0
+        self._target_seen = False
 
     def check(self, event: Event) -> bool:
-        return True
+        if event.activity != self.definition.activation_activity:
+            return True
+        return self._target_seen
 
     def commit(self, event: Event) -> None:
-        d = self.definition
-        if event.activity == d.activation_activity:
-            self._count += 1
+        if event.activity == self.definition.target_activity:
+            self._target_seen = True
 
     def verdict(self) -> Verdict:
-        d = self.definition
-        return Verdict.SATISFIED if self._count >= d.count else Verdict.VIOLATED
+        return Verdict.SATISFIED
