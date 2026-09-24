@@ -125,7 +125,7 @@ def create_app() -> FastAPI:
     @app.post("/models", status_code=status.HTTP_201_CREATED, tags=["management"])
     def add_model(body: AddModelRequest) -> ModelOut:
         """
-        Endpoint for adding models to the server.
+        Endpoint for adding models to the server. Generates model_id and returns it to agent.
         """
         try:
             definitions = parse_decl_text(body.decl)
@@ -135,6 +135,8 @@ def create_app() -> FastAPI:
             ) from e
 
         model_id = str(uuid.uuid4())
+
+        # Track the declare models in memory.
         models[model_id] = MPDeclareModel.build(definitions)
         return ModelOut(
             model_id=model_id, constraints=[_constraint_out(d) for d in definitions]
@@ -142,8 +144,7 @@ def create_app() -> FastAPI:
 
     @app.delete("/models/{model_id}",
                 status_code=status.HTTP_204_NO_CONTENT,
-                tags=["management"],
-    )
+                tags=["management"],)
     def remove_model(model_id: str) -> None:
         # Traces already started on this model keep working until they end
         get_model(model_id)

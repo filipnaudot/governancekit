@@ -47,5 +47,5 @@ class TraceMonitor:
         return [
             Violation(i.definition.id, event=None)
             for i in self.instances
-            if i.verdict != Verdict.SATISFIED
+            if i.verdict() != Verdict.SATISFIED
         ]

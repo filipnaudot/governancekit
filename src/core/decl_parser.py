@@ -120,7 +120,7 @@ def _parse_bracket_body(
         count = int(bracket_items[1]) if len(bracket_items) == 2 else None
         return activity, None, count
 
-    if len(bracket_items != 2):
+    if len(bracket_items) != 2:
         raise ValueError(f"{template} requires 2 activities: {bracket_body!r}")
 
     for item in bracket_items:

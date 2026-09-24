@@ -15,6 +15,6 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 markers = ["benchmark: performance tests"]
 addopts = "-m 'not benchmark'"
