@@ -9,14 +9,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
-
 from core.decl_parser import parse_decl_text
 from core.events import Event
 from core.mp_declare_model import ConstraintDef, MPDeclareModel
 from core.trace_monitor import Decision, TraceMonitor, Violation
-
+from fastapi import FastAPI, HTTPException, status
+from pydantic import BaseModel, Field
 
 # ---------- Request / response schemas ----------
 
