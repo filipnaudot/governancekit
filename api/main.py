@@ -5,6 +5,14 @@ Management endpoints: add/remove models, start/end traces.
 Runtime endpoints: check and commit agent actions against a trace.
 """
 
+"""
+    TODO: When someone calls the server, how can we verify that the someone is a admin or just regular agent.
+
+    TODO: Maybe the check and commit should be in the same request. No one should be able to be committing between a check and a commit.
+
+    TODO: Should use Felix's manager class instead of the core functionality.
+    """
+
 import uuid
 from datetime import UTC, datetime
 from typing import Any
