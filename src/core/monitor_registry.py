@@ -126,7 +126,7 @@ class MonitorRegistry:
             raise KeyError(f"Trace id {trace_id!r} is not monitored.")
         return self.monitors[trace_id].analyze()
 
-    def commit_event(self, trace_id: str, event) -> None:
+    def commit_event(self, trace_id: str, event: Event) -> None:
         """Append an event to a monitored trace and update constraint states.
 
         Does not check the event first. Call check_event beforehand to
