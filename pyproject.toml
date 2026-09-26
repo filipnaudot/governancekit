@@ -1,0 +1,11 @@
+[project]
+name = "governancekit"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["benchmark: performance tests"]
+addopts = "-m 'not benchmark'"
