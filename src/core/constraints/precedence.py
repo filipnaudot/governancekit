@@ -12,7 +12,7 @@ from core.mp_declare_model import ConstraintDef
 class PrecedenceInstance:
     _targets: list[Event]
 
-    def __init__(self, definition: ConstraintDef):
+    def __init__(self, definition: ConstraintDef) -> None:
         self.definition = definition
         self._targets = []
         self._violated = False
@@ -22,15 +22,17 @@ class PrecedenceInstance:
         )
 
     def check(self, event: Event, last: Event | None) -> bool:
-        return not self._is_activation(event) or self._has_matching_target(event)
+        return not self._is_activation(event) or any(
+            self._matches(event, t) for t in self._targets
+        )
 
     def commit(self, event: Event, last: Event | None) -> None:
-        d = self.definition
-        if event.activity == d.target_activity:
-            if self._keep_all_targets or not self._targets:
-                self._targets.append(event)
-        elif not self.check(event):
+        if not self.check(event, last):
             self._violated = True
+        if event.activity == self.definition.target_activity and (
+            self._keep_all_targets or not self._targets
+        ):
+            self._targets.append(event)
 
     def verdict(self) -> Verdict:
         return Verdict.VIOLATED if self._violated else Verdict.SATISFIED
@@ -41,13 +43,9 @@ class PrecedenceInstance:
             d.activation_condition is None or d.activation_condition(event)
         )
 
-    def _has_matching_target(self, activation: Event) -> bool:
+    def _matches(self, activation: Event, target: Event) -> bool:
         d = self.definition
-        return any(
-            (
-                d.correlation_condition is None
-                or d.correlation_condition(activation, target)
-            )
-            and (d.time_condition is None or d.time_condition(activation, target))
-            for target in self._targets
-        )
+        return (
+            d.correlation_condition is None
+            or d.correlation_condition(activation, target)
+        ) and (d.time_condition is None or d.time_condition(activation, target))
