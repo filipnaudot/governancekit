@@ -15,10 +15,10 @@ class ExistenceInstance:
         self.definition = definition
         self._count: int = 0
 
-    def check(self, event: Event) -> bool:
+    def check(self, event: Event | None) -> bool:
         return True
 
-    def commit(self, event: Event) -> None:
+    def commit(self, event: Event, last: Event | None) -> None:
         d = self.definition
         if event.activity == d.activation_activity:
             self._count += 1

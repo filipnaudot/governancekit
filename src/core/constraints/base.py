@@ -14,10 +14,10 @@ class Verdict(Enum):
 
 
 class ConstraintInstance(Protocol):
-    def check(self, event: Event) -> bool:
+    def check(self, event: Event, last: Event) -> bool:
         """Checks if the event is acceptable according to the constraint"""
 
-    def commit(self, event: Event) -> None:
+    def commit(self, event: Event, last: Event) -> None:
         """Records that the specified event has been executed"""
 
     def verdict(self) -> Verdict:

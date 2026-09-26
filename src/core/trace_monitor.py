@@ -1,10 +1,8 @@
 """
 TraceMonitor - runtime trace-level conformance checking.
 
-Applies a MPDeclareModel on a trace.
+Applies an MPDeclareModel to a trace.
 """
-
-from dataclasses import dataclass
 
 from core.constraint_factory import build_instance
 from core.constraints.base import Verdict
@@ -12,40 +10,36 @@ from core.events import Event
 from core.mp_declare_model import MPDeclareModel
 
 
-@dataclass(frozen=True, slots=True)
-class Violation:
-    constraint_id: str
-    event: Event | None
-
-
-@dataclass(frozen=True, slots=True)
-class Decision:
-    allowed: bool
-    violations: tuple[Violation, ...]
-
-
 class TraceMonitor:
-    def __init__(self, model: MPDeclareModel):
+    def __init__(self, model: MPDeclareModel) -> None:
         self.model = model
         self.instances = [build_instance(d) for d in model.constraints]
+        self.last_event: Event | None = None
 
-    def check(self, event: Event) -> Decision:
-        indices = self.model.activity_index.get(event.activity, ())
+    def check(self, event: Event) -> tuple[bool, list[str]]:
         violations = [
-            Violation(constraint_id=self.instances[i].definition.id, event=event)
-            for i in indices
-            if not self.instances[i].check(event)
+            self.instances[i].definition.source
+            for i in self._candidates(event)
+            if not self.instances[i].check(event, self.last_event)
         ]
-        return Decision(allowed=not violations, violations=tuple(violations))
+        return not violations, violations
 
     def commit(self, event: Event) -> None:
-        indices = self.model.activity_index.get(event.activity, ())
-        for i in indices:
-            self.instances[i].commit(event)
+        for i in self._candidates(event):
+            self.instances[i].commit(event, self.last_event)
+        self.last_event = event
 
-    def analyze(self) -> list[Violation]:
+    def analyze(self) -> list[str]:
         return [
-            Violation(i.definition.id, event=None)
+            i.definition.source
             for i in self.instances
-            if i.verdict != Verdict.SATISFIED
+            if i.verdict() != Verdict.SATISFIED
         ]
+
+    def _candidates(self, event: Event) -> set[int]:
+        indices = set(self.model.activity_index.get(event.activity, ()))
+        if self.last_event is not None:
+            indices.update(self.model.after_index.get(self.last_event.activity, ()))
+        else:
+            indices.update(self.model.init_constraints)
+        return indices

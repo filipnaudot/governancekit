@@ -5,6 +5,12 @@ Text-to-MP-DECLARE parser
 import re
 from collections import defaultdict
 
+from core.conditions import (
+    ConditionSyntaxError,
+    create_activation_condition,
+    create_correlation_condition,
+    create_time_condition,
+)
 from core.mp_declare_model import ConstraintDef
 from core.templates import Template
 
@@ -61,7 +67,7 @@ def parse_decl_text(text: str) -> list[ConstraintDef]:
         (
             template_name,
             bracket_body,
-            activity_condition_text,
+            activation_condition_text,
             correlation_condition_text,
             deadline_text,
         ) = match.groups()
@@ -70,13 +76,27 @@ def parse_decl_text(text: str) -> list[ConstraintDef]:
         activation_activity, target_activity, count = _parse_bracket_body(
             template, bracket_body, activities
         )
+        try:
+            activation_condition = _parse_activation_condition(
+                activation_condition_text
+            )
+            correlation_condition = _parse_correlation_condition(
+                correlation_condition_text
+            )
+            deadline = _parse_deadline(deadline_text)
+        except ConditionSyntaxError as e:
+            raise ConditionSyntaxError(f"in constraint {cl!r}: {e}") from e
         definitions.append(
             ConstraintDef(
                 id=f"{template.value}_{len(definitions)}",
+                source=cl.strip(),
                 template=template,
                 activation_activity=activation_activity,
                 target_activity=target_activity,
                 count=count,
+                activation_condition=activation_condition,
+                correlation_condition=correlation_condition,
+                time_condition=deadline,
             )
         )
 
@@ -120,7 +140,7 @@ def _parse_bracket_body(
         count = int(bracket_items[1]) if len(bracket_items) == 2 else None
         return activity, None, count
 
-    if len(bracket_items != 2):
+    if len(bracket_items) != 2:
         raise ValueError(f"{template} requires 2 activities: {bracket_body!r}")
 
     for item in bracket_items:
@@ -130,16 +150,16 @@ def _parse_bracket_body(
     return bracket_items[activation_index], bracket_items[1 - activation_index], None
 
 
-def _parse_activity_condition(activity_condition: str) -> None:
-    pass
+def _parse_activation_condition(activation_condition: str) -> None:
+    return create_activation_condition(activation_condition)
 
 
 def _parse_correlation_condition(correlation_condition: str) -> None:
-    pass
+    return create_correlation_condition(correlation_condition)
 
 
 def _parse_deadline(deadline: str) -> None:
-    pass
+    return create_time_condition(deadline)
 
 
 def _require_declared_activity(
