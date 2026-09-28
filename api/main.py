@@ -17,10 +17,11 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from core.events import Event
-from core.monitor_registry import MonitorRegistry
 from fastapi import FastAPI, HTTPException, status
 from pydantic import AwareDatetime, BaseModel, Field
+
+from core.events import Event
+from core.monitor_registry import MonitorRegistry
 
 # ---------- Request / response schemas ----------
 
