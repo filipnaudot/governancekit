@@ -5,14 +5,6 @@ Management endpoints: add/remove models, start/end traces.
 Runtime endpoints: check and commit agent actions against a trace.
 """
 
-"""
-    TODO: When someone calls the server, how can we verify that the someone is a admin or just regular agent.
-
-    TODO: Implement a lock on each trace monitor. Two agents should not be able to commit at the same time. Look into Race condition.
-
-    TODO: Timer on the traces? Should we keep track of the time a trace has been alive? Traces should end!
-"""
-
 import uuid
 from datetime import UTC, datetime
 from typing import Any
