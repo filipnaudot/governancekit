@@ -1,7 +1,14 @@
+from datetime import UTC, datetime, timedelta
+
+import jwt
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.main import create_app
+
+JWT_SECRET = "test-jwt-secret-that-is-at-least-32-bytes"
+ADMIN_SECRET = "test-admin-secret"
 
 EXISTENCE_DECL = """
     activity login
@@ -16,8 +23,49 @@ PRECEDENCE_DECL = """
 
 
 @pytest.fixture
-def client() -> TestClient:
-    return TestClient(create_app())
+def app() -> FastAPI:
+    return create_app(jwt_secret=JWT_SECRET, admin_secret=ADMIN_SECRET)
+
+
+@pytest.fixture
+def client(app) -> TestClient:
+    """Client logged in as admin."""
+    return _logged_in(app, "admin", ADMIN_SECRET)
+
+
+@pytest.fixture
+def agent_credentials(client) -> tuple[str, str]:
+    return _register_agent(client)
+
+
+@pytest.fixture
+def agent_id(agent_credentials) -> str:
+    return agent_credentials[0]
+
+
+@pytest.fixture
+def agent(app, agent_credentials) -> TestClient:
+    """Client logged in as the agent agent_id."""
+    return _logged_in(app, *agent_credentials)
+
+
+def _token(app: FastAPI, client_id: str, secret: str) -> str:
+    response = TestClient(app).post(
+        "/token", data={"username": client_id, "password": secret}
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["access_token"]
+
+
+def _logged_in(app: FastAPI, client_id: str, secret: str) -> TestClient:
+    token = _token(app, client_id, secret)
+    return TestClient(app, headers={"Authorization": f"Bearer {token}"})
+
+
+def _register_agent(client: TestClient) -> tuple[str, str]:
+    response = client.post("/agents")
+    assert response.status_code == 201, response.text
+    return response.json()["agent_id"], response.json()["secret"]
 
 
 def _add_model(client: TestClient, decl: str) -> str:
@@ -26,10 +74,105 @@ def _add_model(client: TestClient, decl: str) -> str:
     return response.json()["model_id"]
 
 
-def _start_trace(client: TestClient, model_id: str) -> str:
-    response = client.post("/traces", json={"model_id": model_id})
+def _start_trace(client: TestClient, model_id: str, agent_id: str) -> str:
+    response = client.post("/traces", json={"model_id": model_id, "agent_id": agent_id})
     assert response.status_code == 201, response.text
     return response.json()["trace_id"]
+
+
+# ---------- Auth ----------
+
+
+def test_wrong_secret_returns_401(app, agent_id):
+    client = TestClient(app)
+
+    admin = client.post("/token", data={"username": "admin", "password": "wrong"})
+    agent = client.post("/token", data={"username": agent_id, "password": "wrong"})
+
+    assert admin.status_code == 401
+    assert agent.status_code == 401
+
+
+def test_requests_without_token_return_401(app):
+    client = TestClient(app)
+
+    assert client.post("/models", json={"decl": EXISTENCE_DECL}).status_code == 401
+    assert client.post("/traces/x/check", json={"activity": "login"}).status_code == 401
+
+
+def test_expired_token_returns_401(app):
+    expired = jwt.encode(
+        {"sub": "admin", "role": "admin", "exp": datetime.now(UTC) - timedelta(1)},
+        JWT_SECRET,
+        algorithm="HS256",
+    )
+    client = TestClient(app, headers={"Authorization": f"Bearer {expired}"})
+
+    assert client.post("/agents").status_code == 401
+
+
+def test_token_signed_with_other_key_returns_401(app):
+    forged = jwt.encode(
+        {"sub": "admin", "role": "admin", "exp": datetime.now(UTC) + timedelta(1)},
+        "some-other-key-that-is-at-least-32-bytes",
+        algorithm="HS256",
+    )
+    client = TestClient(app, headers={"Authorization": f"Bearer {forged}"})
+
+    assert client.post("/agents").status_code == 401
+
+
+def test_agent_cannot_use_management_endpoints(client, agent, agent_id):
+    model_id = _add_model(client, EXISTENCE_DECL)
+    trace_id = _start_trace(client, model_id, agent_id)
+
+    assert agent.post("/agents").status_code == 403
+    assert agent.post("/models", json={"decl": EXISTENCE_DECL}).status_code == 403
+    assert (
+        agent.post("/traces", json={"model_id": model_id, "agent_id": agent_id})
+    ).status_code == 403
+    assert agent.post(f"/traces/{trace_id}/end").status_code == 403
+
+
+def test_admin_cannot_check_or_commit(client, agent_id):
+    trace_id = _start_trace(client, _add_model(client, EXISTENCE_DECL), agent_id)
+
+    check = client.post(f"/traces/{trace_id}/check", json={"activity": "login"})
+    commit = client.post(f"/traces/{trace_id}/commit", json={"activity": "login"})
+
+    assert check.status_code == 403
+    assert commit.status_code == 403
+
+
+def test_agent_cannot_use_other_agents_trace(app, client, agent, agent_id):
+    other = _logged_in(app, *_register_agent(client))
+    trace_id = _start_trace(client, _add_model(client, EXISTENCE_DECL), agent_id)
+
+    check = other.post(f"/traces/{trace_id}/check", json={"activity": "login"})
+    commit = other.post(f"/traces/{trace_id}/commit", json={"activity": "login"})
+
+    assert check.status_code == 404
+    assert commit.status_code == 404
+
+
+def test_agent_works_on_parallel_traces(client, agent, agent_id):
+    model_id = _add_model(client, EXISTENCE_DECL)
+    first = _start_trace(client, model_id, agent_id)
+    second = _start_trace(client, model_id, agent_id)
+
+    for trace_id in (first, second):
+        check = agent.post(f"/traces/{trace_id}/check", json={"activity": "login"})
+        commit = agent.post(f"/traces/{trace_id}/commit", json={"activity": "login"})
+        assert check.status_code == 200
+        assert commit.status_code == 204
+
+
+def test_start_trace_for_unknown_agent_returns_404(client):
+    model_id = _add_model(client, EXISTENCE_DECL)
+
+    response = client.post("/traces", json={"model_id": model_id, "agent_id": "nope"})
+
+    assert response.status_code == 404
 
 
 # ---------- Management ----------
@@ -58,25 +201,25 @@ def test_remove_model(client):
     assert client.delete(f"/models/{model_id}").status_code == 404
 
 
-def test_start_trace_on_unknown_model_returns_404(client):
-    response = client.post("/traces", json={"model_id": "nope"})
+def test_start_trace_on_unknown_model_returns_404(client, agent_id):
+    response = client.post("/traces", json={"model_id": "nope", "agent_id": agent_id})
 
     assert response.status_code == 404
 
 
-def test_trace_survives_model_removal(client):
+def test_trace_survives_model_removal(client, agent, agent_id):
     model_id = _add_model(client, EXISTENCE_DECL)
-    trace_id = _start_trace(client, model_id)
+    trace_id = _start_trace(client, model_id, agent_id)
     client.delete(f"/models/{model_id}")
 
-    response = client.post(f"/traces/{trace_id}/check", json={"activity": "login"})
+    response = agent.post(f"/traces/{trace_id}/check", json={"activity": "login"})
 
     assert response.status_code == 200
 
 
-def test_end_trace_without_constraints_is_conformant(client):
+def test_end_trace_without_constraints_is_conformant(client, agent_id):
     model_id = _add_model(client, "activity login")
-    trace_id = _start_trace(client, model_id)
+    trace_id = _start_trace(client, model_id, agent_id)
 
     response = client.post(f"/traces/{trace_id}/end")
 
@@ -88,22 +231,22 @@ def test_end_trace_without_constraints_is_conformant(client):
     }
 
 
-def test_ended_trace_is_removed(client):
+def test_ended_trace_is_removed(client, agent, agent_id):
     model_id = _add_model(client, "activity login")
-    trace_id = _start_trace(client, model_id)
+    trace_id = _start_trace(client, model_id, agent_id)
     client.post(f"/traces/{trace_id}/end")
 
-    response = client.post(f"/traces/{trace_id}/check", json={"activity": "login"})
+    response = agent.post(f"/traces/{trace_id}/check", json={"activity": "login"})
 
     assert response.status_code == 404
 
 
 @pytest.mark.xfail(reason="TraceMonitor.analyze compares i.verdict without calling it")
-def test_end_trace_reports_missing_existence(client):
+def test_end_trace_reports_missing_existence(client, agent, agent_id):
     model_id = _add_model(client, EXISTENCE_DECL)
-    satisfied = _start_trace(client, model_id)
-    unsatisfied = _start_trace(client, model_id)
-    client.post(f"/traces/{satisfied}/commit", json={"activity": "login"})
+    satisfied = _start_trace(client, model_id, agent_id)
+    unsatisfied = _start_trace(client, model_id, agent_id)
+    agent.post(f"/traces/{satisfied}/commit", json={"activity": "login"})
 
     ok = client.post(f"/traces/{satisfied}/end").json()
     missing = client.post(f"/traces/{unsatisfied}/end").json()
@@ -116,10 +259,10 @@ def test_end_trace_reports_missing_existence(client):
 # ---------- Runtime ----------
 
 
-def test_check_allowed(client):
-    trace_id = _start_trace(client, _add_model(client, EXISTENCE_DECL))
+def test_check_allowed(client, agent, agent_id):
+    trace_id = _start_trace(client, _add_model(client, EXISTENCE_DECL), agent_id)
 
-    response = client.post(
+    response = agent.post(
         f"/traces/{trace_id}/check",
         json={"activity": "login", "payload": {"user": "alice"}},
     )
@@ -128,35 +271,35 @@ def test_check_allowed(client):
     assert response.json() == {"allowed": True, "violations": []}
 
 
-def test_commit_returns_204(client):
-    trace_id = _start_trace(client, _add_model(client, EXISTENCE_DECL))
+def test_commit_returns_204(client, agent, agent_id):
+    trace_id = _start_trace(client, _add_model(client, EXISTENCE_DECL), agent_id)
 
-    response = client.post(f"/traces/{trace_id}/commit", json={"activity": "login"})
+    response = agent.post(f"/traces/{trace_id}/commit", json={"activity": "login"})
 
     assert response.status_code == 204
 
 
-def test_check_on_unknown_trace_returns_404(client):
-    response = client.post("/traces/nope/check", json={"activity": "login"})
+def test_check_on_unknown_trace_returns_404(agent):
+    response = agent.post("/traces/nope/check", json={"activity": "login"})
 
     assert response.status_code == 404
 
 
-def test_check_without_activity_returns_422(client):
-    trace_id = _start_trace(client, _add_model(client, EXISTENCE_DECL))
+def test_check_without_activity_returns_422(client, agent, agent_id):
+    trace_id = _start_trace(client, _add_model(client, EXISTENCE_DECL), agent_id)
 
-    response = client.post(f"/traces/{trace_id}/check", json={})
+    response = agent.post(f"/traces/{trace_id}/check", json={})
 
     assert response.status_code == 422
 
 
 @pytest.mark.xfail(reason="decl_parser: len(bracket_items != 2) breaks binary templates")
-def test_precedence_blocks_until_target_committed(client):
-    trace_id = _start_trace(client, _add_model(client, PRECEDENCE_DECL))
+def test_precedence_blocks_until_target_committed(client, agent, agent_id):
+    trace_id = _start_trace(client, _add_model(client, PRECEDENCE_DECL), agent_id)
 
-    blocked = client.post(f"/traces/{trace_id}/check", json={"activity": "delete"})
-    client.post(f"/traces/{trace_id}/commit", json={"activity": "authorize"})
-    allowed = client.post(f"/traces/{trace_id}/check", json={"activity": "delete"})
+    blocked = agent.post(f"/traces/{trace_id}/check", json={"activity": "delete"})
+    agent.post(f"/traces/{trace_id}/commit", json={"activity": "authorize"})
+    allowed = agent.post(f"/traces/{trace_id}/check", json={"activity": "delete"})
 
     assert blocked.json() == {
         "allowed": False,
