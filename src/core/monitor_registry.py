@@ -6,7 +6,9 @@ permanently violate a constraint.
 """
 
 import threading
+from datetime import datetime
 
+from core.decision import Decision
 from core.decl_parser import parse_decl_text
 from core.events import Event
 from core.mp_declare_model import ConstraintDef, MPDeclareModel
@@ -100,6 +102,62 @@ class MonitorRegistry:
                 raise KeyError(f"Trace id {trace_id!r} is not monitored.")
             del self.monitors[trace_id]
             del self._trace_locks[trace_id]
+
+    def begin_event(
+        self, trace_id: str, event: Event
+    ) -> tuple[Decision, str | None, list[str]]:
+        """
+        Ask whether an activity may begin, and reserve it if allowed.
+
+        Checking and reserving happen atomically, so no other call on the trace
+        can come in between. Several activities may be running at once.
+
+        Args:
+            trace_id: Key of the monitored trace.
+            event: The activity that wants to begin, with its final payload.
+
+        Returns:
+            A tuple (decision, instance_id, blocking). decision is ALLOWED,
+            WAIT (may become allowed later) or DENIED (would permanently violate
+            the model). instance_id is only set if ALLOWED and is needed for
+            finish_event. blocking holds the source text of the constraints
+            that did not allow it.
+
+        Raises:
+            KeyError: If trace_id is not being monitored.
+        """
+        monitor, lock = self._monitor(trace_id)
+        with lock:
+            return monitor.begin(event)
+
+    def finish_event(
+        self,
+        trace_id: str,
+        instance_id: str,
+        completed: bool,
+        completed_at: datetime | None = None,
+    ) -> Event:
+        """
+        Finish an activity that was allowed by begin_event.
+
+        Only a completed activity affects the constraints. A failed or aborted
+        one is just released.
+
+        Args:
+            trace_id: Key of the monitored trace.
+            instance_id: Returned by begin_event.
+            completed: True if the activity completed successfully.
+            completed_at: Completion time, defaults to now.
+
+        Returns:
+            The event the activity began with.
+
+        Raises:
+            KeyError: If trace_id is not being monitored or instance_id is not running.
+        """
+        monitor, lock = self._monitor(trace_id)
+        with lock:
+            return monitor.finish(instance_id, completed, completed_at)
 
     def check_event(self, trace_id: str, event: Event) -> tuple[bool, list[str]]:
         """
