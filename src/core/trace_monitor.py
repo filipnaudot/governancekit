@@ -33,7 +33,7 @@ class TraceMonitor:
                 self.instances[i].definition.source,
                 self.instances[i].can_begin(event, self.running, self.last_completed),
             )
-            for i in self._candidates(event)
+            for i in self._begin_candidates(event)
         ]
         blocking = [source for source, d in decisions if d is not Decision.ALLOWED]
         if blocking:
@@ -62,7 +62,7 @@ class TraceMonitor:
         if completed:
             if completed_at is None:
                 completed_at = datetime.now(UTC)
-            for i in self._candidates(event):
+            for i in self._finish_candidates(event):
                 self.instances[i].on_finish(event, completed_at)
             self.last_completed = event
         return event
@@ -70,7 +70,7 @@ class TraceMonitor:
     def check(self, event: Event) -> tuple[bool, list[str]]:
         violations = [
             self.instances[i].definition.source
-            for i in self._candidates(event)
+            for i in self._begin_candidates(event)
             if self.instances[i].can_begin(event, self.running, self.last_completed)
             is not Decision.ALLOWED
         ]
@@ -78,7 +78,7 @@ class TraceMonitor:
 
     def commit(self, event: Event) -> None:
         # A committed event is instantaneous: it completes at its own timestamp
-        for i in self._candidates(event):
+        for i in self._finish_candidates(event):
             self.instances[i].on_finish(event, event.timestamp)
         self.last_completed = event
 
@@ -89,8 +89,22 @@ class TraceMonitor:
             if i.verdict() != Verdict.SATISFIED
         ]
 
-    def _candidates(self, event: Event) -> set[int]:
-        indices = set(self.model.activity_index.get(event.activity, ()))
-        if self.last_completed is None:
-            indices.update(self.model.init_constraints)
-        return indices
+    def unfinished(self) -> dict[str, Event]:
+        """Activities that have begun but not finished (iid -> event).
+
+        They are not part of analyze(), since only completed activities count.
+        """
+        return dict(self._in_flight)
+
+    def _begin_candidates(self, event: Event) -> tuple[int, ...]:
+        return (
+            self.model.begin_index.get(event.activity, ())
+            + self.model.ordering_constraints
+        )
+
+    def _finish_candidates(self, event: Event) -> tuple[int, ...]:
+        # Ordering constraints hear about every completion, e.g. Init needs the first one
+        return (
+            self.model.finish_index.get(event.activity, ())
+            + self.model.ordering_constraints
+        )

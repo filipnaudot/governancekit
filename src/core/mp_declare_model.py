@@ -10,7 +10,27 @@ from typing import Self
 from core.events import Event
 from core.templates import Template
 
-AFTER_TEMPLATES = frozenset({Template.CHAIN_RESPONSE, Template.CHAIN_SUCCESSION})
+# Can never be permanently violated by an event, so never block an activity from beginning
+NEVER_BLOCKING_TEMPLATES = frozenset(
+    {
+        Template.EXISTENCE,
+        Template.END,
+        Template.CHOICE,
+        Template.RESPONDED_EXISTENCE,
+        Template.CO_EXISTENCE,
+        Template.RESPONSE,
+    }
+)
+
+# Constrain which activity completes first or next, so any activity can violate them
+ORDERING_TEMPLATES = frozenset(
+    {
+        Template.INIT,
+        Template.CHAIN_RESPONSE,
+        Template.CHAIN_PRECEDENCE,
+        Template.CHAIN_SUCCESSION,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -29,29 +49,32 @@ class ConstraintDef:
 @dataclass(frozen=True, slots=True)
 class MPDeclareModel:
     constraints: tuple[ConstraintDef, ...]
-    activity_index: dict[str, tuple[int, ...]]  # activity -> candidate constraints
-    after_index: dict[str, tuple[int, ...]]  # activation -> chain response constraints
-    init_constraints: frozenset[int]  # init contraints
+    begin_index: dict[str, tuple[int, ...]]  # activity -> blocking constraints mentioning it
+    finish_index: dict[str, tuple[int, ...]]  # activity -> non-ordering constraints mentioning it
+    ordering_constraints: tuple[int, ...]  # asked on every begin and finish
 
     @classmethod
     def build(cls, constraints: list[ConstraintDef]) -> Self:
-        activity_index: dict[str, list[int]] = defaultdict(list)
-        after_index: dict[str, list[int]] = defaultdict(list)
-        init_constraints: set[int] = set()
+        begin_index: dict[str, list[int]] = defaultdict(list)
+        finish_index: dict[str, list[int]] = defaultdict(list)
+        ordering_constraints: list[int] = []
 
         for i, c in enumerate(constraints):
-            activity_index[c.activation_activity].append(i)
-            if c.target_activity and c.target_activity != c.activation_activity:
-                activity_index[c.target_activity].append(i)
+            if c.template in ORDERING_TEMPLATES:
+                ordering_constraints.append(i)
+                continue
 
-            if c.template in AFTER_TEMPLATES:
-                after_index[c.activation_activity].append(i)
-            elif c.template is Template.INIT:
-                init_constraints.add(i)
+            activities = {c.activation_activity}
+            if c.target_activity:
+                activities.add(c.target_activity)
+            for activity in activities:
+                finish_index[activity].append(i)
+                if c.template not in NEVER_BLOCKING_TEMPLATES:
+                    begin_index[activity].append(i)
 
         return cls(
             constraints=tuple(constraints),
-            activity_index={k: tuple(v) for k, v in activity_index.items()},
-            after_index={k: tuple(v) for k, v in after_index.items()},
-            init_constraints=frozenset(init_constraints),
+            begin_index={k: tuple(v) for k, v in begin_index.items()},
+            finish_index={k: tuple(v) for k, v in finish_index.items()},
+            ordering_constraints=tuple(ordering_constraints),
         )
