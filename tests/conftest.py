@@ -12,6 +12,15 @@ def existence_def(activation: str, id: str) -> ConstraintDef:
     )
 
 
+def init_def(activation: str, id: str) -> ConstraintDef:
+    return ConstraintDef(
+        id=id,
+        source=f"Init[{activation}]",
+        template=Template.INIT,
+        activation_activity=activation,
+    )
+
+
 def precedence_def(activation: str, target: str, id: str, source: str) -> ConstraintDef:
     return ConstraintDef(
         id=id,
