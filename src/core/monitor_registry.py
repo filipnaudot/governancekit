@@ -87,21 +87,39 @@ class MonitorRegistry:
             self.monitors[trace_id] = TraceMonitor(model)
             self._trace_locks[trace_id] = threading.Lock()
 
-    def end_monitor(self, trace_id: str) -> None:
+    def end_monitor(
+        self, trace_id: str, abort_running: bool = False
+    ) -> dict[str, Event]:
         """
         Stop monitoring a trace and remove its monitor.
 
         Args:
             trace_id: Key of the trace to stop monitoring.
+            abort_running: End the trace even if activities are still running;
+                           they are aborted.
+
+        Returns:
+            The aborted activities (instance id -> event). Empty if nothing was running.
 
         Raises:
             KeyError: If trace_id is not being monitored.
+            ValueError: If activities are still running and abort_running is False.
         """
-        with self._lock:
-            if trace_id not in self.monitors:
-                raise KeyError(f"Trace id {trace_id!r} is not monitored.")
-            del self.monitors[trace_id]
-            del self._trace_locks[trace_id]
+        monitor, lock = self._monitor(trace_id)
+        # Wait for ongoing calls on the trace. Taking the registry lock while holding
+        # the trace lock is safe: the registry lock is never held while taking a trace lock.
+        with lock:
+            unfinished = monitor.unfinished()
+            if unfinished and not abort_running:
+                raise ValueError(
+                    f"Trace id {trace_id!r} has {len(unfinished)} running activities."
+                )
+            with self._lock:
+                if self.monitors.get(trace_id) is not monitor:
+                    raise KeyError(f"Trace id {trace_id!r} is not monitored.")
+                del self.monitors[trace_id]
+                del self._trace_locks[trace_id]
+        return unfinished
 
     def begin_event(
         self, trace_id: str, event: Event
@@ -197,6 +215,25 @@ class MonitorRegistry:
         monitor, lock = self._monitor(trace_id)
         with lock:
             return monitor.analyze()
+
+    def unfinished(self, trace_id: str) -> dict[str, Event]:
+        """Activities that have begun but not finished.
+
+        Lets callers find activities that never finish and abort them with
+        finish_event(..., completed=False).
+
+        Args:
+            trace_id: Key of the monitored trace.
+
+        Returns:
+            The running activities (instance id -> event, with its begin time).
+
+        Raises:
+            KeyError: If trace_id is not being monitored.
+        """
+        monitor, lock = self._monitor(trace_id)
+        with lock:
+            return monitor.unfinished()
 
     def commit_event(self, trace_id: str, event: Event) -> None:
         """Append an event to a monitored trace and update constraint states.
