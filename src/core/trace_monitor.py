@@ -15,6 +15,14 @@ from core.mp_declare_model import MPDeclareModel
 
 
 class TraceMonitor:
+    """Monitors one trace, in which several activities may run at the same time.
+
+    An activity asks begin() and, if allowed, reports finish() with its
+    instance id. Only completed activities affect the constraints.
+
+    Not thread-safe; MonitorRegistry serialises the calls per trace.
+    """
+
     def __init__(self, model: MPDeclareModel) -> None:
         self.model = model
         self.instances = [build_instance(d) for d in model.constraints]
@@ -68,6 +76,7 @@ class TraceMonitor:
         return event
 
     def check(self, event: Event) -> tuple[bool, list[str]]:
+        """Like begin(), but reserves nothing. Kept for compatibility."""
         violations = [
             self.instances[i].definition.source
             for i in self._begin_candidates(event)
@@ -77,6 +86,8 @@ class TraceMonitor:
         return not violations, violations
 
     def commit(self, event: Event) -> None:
+        """Record a completed event without checking it or seeing running
+        activities. Kept for compatibility; don't mix with begin()/finish()."""
         # A committed event is instantaneous: it completes at its own timestamp
         for i in self._finish_candidates(event):
             self.instances[i].on_finish(event, event.timestamp)

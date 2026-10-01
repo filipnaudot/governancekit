@@ -1,5 +1,5 @@
 """
-Shared interface of every consraint
+Shared interface of every constraint
 """
 
 from collections.abc import Mapping

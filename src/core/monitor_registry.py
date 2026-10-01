@@ -1,8 +1,9 @@
 """Public interface for runtime conformance checking of MP-Declare models.
 
-Registers models and monitors traces against them. Callers check events
-before committing them, so an agent action can be blocked before it would
-permanently violate a constraint.
+Registers models and monitors traces against them. Callers ask before an
+activity begins and report when it finishes, so an agent action can be blocked
+before it would permanently violate a constraint. Several activities may run
+at the same time.
 """
 
 import threading
@@ -22,8 +23,13 @@ class MonitorRegistry:
     trace gets its own monitor, created by start_monitor and removed by
     end_monitor.
 
-    Typical use per event: call check_event, and if the event is allowed,
-    perform the action and call commit_event.
+    Typical use per activity: call begin_event. If it is ALLOWED, perform the
+    activity and call finish_event with its instance id. If it is WAIT, ask
+    again later; if it is DENIED, don't perform it.
+
+    check_event and commit_event are the older one-step flow, kept for
+    compatibility. They don't see running activities, so don't mix them with
+    begin_event and finish_event on the same trace.
 
     Thread-safe: it starts no threads itself, but may be called from several.
     Calls on the same trace run one at a time; different traces don't wait
@@ -182,16 +188,17 @@ class MonitorRegistry:
         Check whether an event can be committed without a permanent violation.
 
         Does not modify the trace. Temporary violations are allowed, since
-        they can still be resolved by later events.
+        they can still be resolved by later events. Kept for compatibility:
+        nothing is reserved, so prefer begin_event.
 
         Args:
             trace_id: Key of the monitored trace.
             event: Event to check.
 
         Returns:
-            A tuple (allowed, violations). allowed is True if committing the
-            event would not permanently violate any constraint. violations
-            holds the source text of the constraints it would violate.
+            A tuple (allowed, violations). allowed is True if begin_event would
+            answer ALLOWED. violations holds the source text of the constraints
+            that don't allow it.
 
         Raises:
             KeyError: If trace_id is not being monitored.
@@ -239,7 +246,9 @@ class MonitorRegistry:
         """Append an event to a monitored trace and update constraint states.
 
         Does not check the event first. Call check_event beforehand to
-        reject events that would cause a permanent violation.
+        reject events that would cause a permanent violation. Kept for
+        compatibility: the event completes instantly at its own timestamp,
+        bypassing running activities, so prefer begin_event and finish_event.
 
         Args:
             trace_id: Key of the monitored trace.
