@@ -219,7 +219,7 @@ def create_app(
         "/traces",
         status_code=status.HTTP_201_CREATED,
         tags=["management"],
-        dependencies=[Depends(require_admin)],
+        dependencies=[Depends(require_agent)],
     )
     def start_trace(body: StartTraceRequest) -> TraceOut:
         if body.agent_id not in auth.agents:
@@ -237,7 +237,7 @@ def create_app(
     @app.post(
         "/traces/{trace_id}/end",
         tags=["management"],
-        dependencies=[Depends(require_admin)],
+        dependencies=[Depends(require_agent)],
     )
     def end_trace(trace_id: str) -> EndTraceResponse:
         try:
