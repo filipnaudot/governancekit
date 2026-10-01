@@ -21,11 +21,15 @@ For a line "Constraint[A, B] | ActCond | CorrCond | Deadline" it filters:
 _CONSTRAINT_LINE = re.compile(r"^([^\[]+)\[([^\]]+)\]\s*\|([^|]*)\|([^|]*)\|(.*)$")
 
 """
-Position of activation activity within the bracket body of a constraint
+Position of activation activity within the bracket body of a constraint (default 0)
 """
 _ACTIVATION_ARG = {
     Template.EXISTENCE: 0,
     Template.PRECEDENCE: 1,
+    Template.ALTERNATE_PRECEDENCE: 1,
+    Template.CHAIN_PRECEDENCE: 1,
+    Template.NOT_PRECEDENCE: 1,
+    Template.NOT_CHAIN_PRECEDENCE: 1,
 }
 
 """
@@ -33,7 +37,17 @@ Unary constraints
 """
 _UNARY = {
     Template.EXISTENCE,
+    Template.ABSENCE,
+    Template.EXACTLY,
+    Template.INIT,
+    Template.END,
 }
+
+"""
+Template names are matched ignoring case, spaces and hyphens, as in Declare4Py:
+"Chain Response", "ChainResponse" and "Co-Existence" all work
+"""
+_TEMPLATES_BY_NAME = {t.value.replace(" ", "").replace("-", ""): t for t in Template}
 
 
 def parse_decl_text(text: str) -> list[ConstraintDef]:
@@ -119,8 +133,8 @@ def _parse_domain(line: str, domains: dict[str, set[str]]) -> None:
         domains[attribute.strip()].add(value.strip())
 
 
-def _parse_template(template_name: str):
-    return Template[template_name.strip().upper().replace(" ", "_")]
+def _parse_template(template_name: str) -> Template:
+    return _TEMPLATES_BY_NAME[template_name.replace(" ", "").replace("-", "").lower()]
 
 
 def _parse_bracket_body(

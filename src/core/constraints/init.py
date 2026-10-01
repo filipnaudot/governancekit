@@ -4,7 +4,11 @@ MP-DECLARE Init constraint
 Satisfied if trace starts with the given activity
 """
 
+from collections.abc import Mapping
+from datetime import datetime
+
 from core.constraints.base import Verdict
+from core.decision import Decision
 from core.events import Event
 from core.mp_declare_model import ConstraintDef
 
@@ -12,13 +16,24 @@ from core.mp_declare_model import ConstraintDef
 class InitInstance:
     def __init__(self, definition: ConstraintDef):
         self.definition = definition
+        self._decided = False
         self._satisfied = False
 
-    def check(self, event: Event, last: Event | None) -> bool:
-        return last is not None or self._is_activation(event)
+    def can_begin(
+        self,
+        event: Event,
+        running: Mapping[str, Mapping[str, Event]],
+        last_completed: Event | None,
+    ) -> Decision:
+        # Until the first completion, only the activation may begin
+        if last_completed is not None or self._is_activation(event):
+            return Decision.ALLOWED
+        return Decision.WAIT
 
-    def commit(self, event: Event, last: Event | None) -> None:
-        if last is None:
+    def on_finish(self, event: Event, completed_at: datetime) -> None:
+        # Only the first completion decides the constraint
+        if not self._decided:
+            self._decided = True
             self._satisfied = self._is_activation(event)
 
     def verdict(self) -> Verdict:

@@ -1,10 +1,13 @@
 """
-Shared interface of every consraint
+Shared interface of every constraint
 """
 
+from collections.abc import Mapping
+from datetime import datetime
 from enum import Enum
 from typing import Protocol
 
+from core.decision import Decision
 from core.events import Event
 
 
@@ -14,11 +17,17 @@ class Verdict(Enum):
 
 
 class ConstraintInstance(Protocol):
-    def check(self, event: Event, last: Event) -> bool:
-        """Checks if the event is acceptable according to the constraint"""
+    def can_begin(
+        self,
+        event: Event,
+        running: Mapping[str, Mapping[str, Event]],
+        last_completed: Event | None,
+    ) -> Decision:
+        """Decides if the event may begin, given the running activities
+        (activity -> {instance id -> event}) and the last completed activity"""
 
-    def commit(self, event: Event, last: Event) -> None:
-        """Records that the specified event has been executed"""
+    def on_finish(self, event: Event, completed_at: datetime) -> None:
+        """Records that the event completed successfully"""
 
     def verdict(self) -> Verdict:
         """Current status: SATISFIED / VIOLATED"""
