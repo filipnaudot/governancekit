@@ -59,11 +59,10 @@ load_model() {
     MODEL=$(echo "$response" | _field model_id) && echo "MODEL=$MODEL"
 }
 
-# Start a new trace (one agent run) on $MODEL for $AGENT_ID and remember its id in $TRACE
+# Start a new trace (one agent run) on $MODEL as the agent and remember its id in $TRACE
 start_trace() {
     local response
-    response=$(_post "$ADMIN_TOKEN" /traces \
-        "{\"model_id\": \"$MODEL\", \"agent_id\": \"$AGENT_ID\"}")
+    response=$(_post "$AGENT_TOKEN" /traces "{\"model_id\": \"$MODEL\"}")
     echo "$response" | _pretty
     TRACE=$(echo "$response" | _field trace_id) && echo "TRACE=$TRACE"
 }
@@ -96,5 +95,5 @@ act() {
 
 # Finish the run and get the final verdict
 end_trace() {
-    _post "$ADMIN_TOKEN" "/traces/$TRACE/end" | _pretty
+    _post "$AGENT_TOKEN" "/traces/$TRACE/end" | _pretty
 }
