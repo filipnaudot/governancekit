@@ -4,7 +4,10 @@ version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.141",
+    "pwdlib[argon2]>=0.3",
     "pydantic>=2.13",
+    "PyJWT>=2.15",
+    "python-multipart>=0.0.32",
     "uvicorn>=0.53",
 ]
 
