@@ -49,8 +49,12 @@ class ConstraintDef:
 @dataclass(frozen=True, slots=True)
 class MPDeclareModel:
     constraints: tuple[ConstraintDef, ...]
-    begin_index: dict[str, tuple[int, ...]]  # activity -> blocking constraints mentioning it
-    finish_index: dict[str, tuple[int, ...]]  # activity -> non-ordering constraints mentioning it
+    begin_index: dict[
+        str, tuple[int, ...]
+    ]  # activity -> blocking constraints mentioning it
+    finish_index: dict[
+        str, tuple[int, ...]
+    ]  # activity -> non-ordering constraints mentioning it
     ordering_constraints: tuple[int, ...]  # asked on every begin and finish
 
     @classmethod
