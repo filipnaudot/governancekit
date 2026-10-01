@@ -21,7 +21,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import AwareDatetime, BaseModel, Field
 
-from api.auth import Authenticator, Principal, Role
+from api.auth import Agent, Authenticator, Principal, Role
 from core.events import Event
 from core.monitor_registry import MonitorRegistry
 
@@ -37,8 +37,32 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-class RegisterAgentResponse(BaseModel):
+class RegisterAgentRequest(BaseModel):
+    """
+    MVP class for agent registry.
+    TODO Find out what information is interesting about an agent.
+    """
+    agent_name: str
+
+
+class AgentInfo(BaseModel):
+    """
+    Public information about an agent. Never includes its secret or hash.
+    """
+
     agent_id: str
+    agent_name: str
+
+    @classmethod
+    def of(cls, agent: Agent) -> "AgentInfo":
+        """
+        The class method chooses which fields of AgentInfo that is passed to the client.
+        """
+        return cls(agent_id=agent.id, agent_name=agent.name)
+
+
+class RegisterAgentResponse(BaseModel):
+    agent_info: AgentInfo
     secret: str = Field(description="Shown only once; the server keeps a hash")
 
 
@@ -80,6 +104,9 @@ class EndTraceResponse(BaseModel):
     conformant: bool
     violations: list[str]
 
+
+class AgentListResponse(BaseModel):
+    agents: list[AgentInfo]
 
 # ---------- App ----------
 
@@ -147,16 +174,29 @@ def create_app(
 
     # --- Management ---
 
+    @app.get("/agents", tags=["management"], dependencies=[Depends(require_admin)])
+    def return_known_agents() -> AgentListResponse:
+        """
+        Admin endpoint. Returns the known agents from the server's memory.
+        The function could be extended to return more properties about the agents. Do so by changing the .of method of AgnetInfo.
+        """
+        return AgentListResponse(
+            agents=[AgentInfo.of(agent) for agent in auth.agents.values()]
+        )
+
     @app.post(
         "/agents",
         status_code=status.HTTP_201_CREATED,
         tags=["management"],
         dependencies=[Depends(require_admin)],
     )
-    def register_agent() -> RegisterAgentResponse:
-        """Register an agent and return its ID and secret."""
-        agent_id, secret = auth.register_agent()
-        return RegisterAgentResponse(agent_id=agent_id, secret=secret)
+    def register_agent(body: RegisterAgentRequest) -> RegisterAgentResponse:
+        """
+        Register an agent and return its ID and secret.
+        """
+        # The server creates the ID and secret
+        agent, secret = auth.register_agent(name=body.agent_name)
+        return RegisterAgentResponse(agent_info=AgentInfo.of(agent), secret=secret)
 
     @app.post(
         "/models",

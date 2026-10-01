@@ -62,10 +62,10 @@ def _logged_in(app: FastAPI, client_id: str, secret: str) -> TestClient:
     return TestClient(app, headers={"Authorization": f"Bearer {token}"})
 
 
-def _register_agent(client: TestClient) -> tuple[str, str]:
-    response = client.post("/agents")
+def _register_agent(client: TestClient, name: str = "test-agent") -> tuple[str, str]:
+    response = client.post("/agents", json={"agent_name": name})
     assert response.status_code == 201, response.text
-    return response.json()["agent_id"], response.json()["secret"]
+    return response.json()["agent_info"]["agent_id"], response.json()["secret"]
 
 
 def _add_model(client: TestClient, decl: str) -> str:
@@ -108,7 +108,7 @@ def test_expired_token_returns_401(app):
     )
     client = TestClient(app, headers={"Authorization": f"Bearer {expired}"})
 
-    assert client.post("/agents").status_code == 401
+    assert client.get("/agents").status_code == 401
 
 
 def test_token_signed_with_other_key_returns_401(app):
@@ -119,14 +119,15 @@ def test_token_signed_with_other_key_returns_401(app):
     )
     client = TestClient(app, headers={"Authorization": f"Bearer {forged}"})
 
-    assert client.post("/agents").status_code == 401
+    assert client.get("/agents").status_code == 401
 
 
 def test_agent_cannot_use_management_endpoints(client, agent, agent_id):
     model_id = _add_model(client, EXISTENCE_DECL)
     trace_id = _start_trace(client, model_id, agent_id)
 
-    assert agent.post("/agents").status_code == 403
+    assert agent.post("/agents", json={"agent_name": "x"}).status_code == 403
+    assert agent.get("/agents").status_code == 403
     assert agent.post("/models", json={"decl": EXISTENCE_DECL}).status_code == 403
     assert (
         agent.post("/traces", json={"model_id": model_id, "agent_id": agent_id})
@@ -176,6 +177,43 @@ def test_start_trace_for_unknown_agent_returns_404(client):
 
 
 # ---------- Management ----------
+
+
+def test_register_agent_returns_info_and_secret(client):
+    response = client.post("/agents", json={"agent_name": "support-bot"})
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["agent_info"]["agent_name"] == "support-bot"
+    assert body["agent_info"]["agent_id"]
+    assert body["secret"]
+
+
+def test_register_agent_without_name_returns_422(client):
+    assert client.post("/agents", json={}).status_code == 422
+
+
+def test_list_agents(client):
+    support_id, _ = _register_agent(client, "support-bot")
+    billing_id, _ = _register_agent(client, "billing-bot")
+
+    response = client.get("/agents")
+
+    assert response.status_code == 200
+    assert sorted(response.json()["agents"], key=lambda a: a["agent_name"]) == [
+        {"agent_id": billing_id, "agent_name": "billing-bot"},
+        {"agent_id": support_id, "agent_name": "support-bot"},
+    ]
+
+
+def test_list_agents_does_not_leak_secrets(client):
+    _, secret = _register_agent(client)
+
+    response = client.get("/agents")
+
+    assert secret not in response.text
+    assert "hash" not in response.text
+    assert "argon2" not in response.text
 
 
 def test_add_model_returns_constraints(client):

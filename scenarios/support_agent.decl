@@ -1,16 +1,1 @@
-# Customer support agent handling a refund ticket
-
-activity verify_identity
-activity view_account
-activity approve_refund
-activity issue_refund
-activity close_ticket
-
-# The customer's identity must be verified before their account is viewed
-Precedence[verify_identity, view_account] |||
-
-# A refund must be approved (e.g. by a manager) before it is issued
-Precedence[approve_refund, issue_refund] |||
-
-# Every ticket must be closed before the run ends
-Existence[close_ticket, 1] |||
+activity verify_identity\nactivityview_account\nactivity approve_refund\nactivity issue_refund\nactivity close_ticket\nPrecedence[verify_identity, view_account] |||\nPrecedence[approve_refund, issue_refund] |||\nExistence[close_ticket, 1] |||\n

@@ -32,14 +32,23 @@ class Principal:
     role: Role
 
 
+@dataclass(frozen=True)
+class Agent:
+    """A registered agent as stored by the server. Never sent to clients."""
+
+    id: str
+    name: str
+    secret_hash: str
+
+
 class Authenticator:
     """Issues and verifies JWTs, and keeps the known agents in memory.
 
     Attributes:
-        agents: Hashed agent secrets, keyed by agent ID.
+        agents: Registered agents, keyed by agent ID.
     """
 
-    agents: dict[str, str]
+    agents: dict[str, Agent]
 
     def __init__(self, jwt_secret: str, admin_secret: str):
         self._jwt_secret = jwt_secret
@@ -47,17 +56,22 @@ class Authenticator:
         self._hasher = PasswordHash.recommended()
         self.agents = {}
 
-    def register_agent(self) -> tuple[str, str]:
+    def register_agent(self, name: str) -> tuple[Agent, str]:
         """Register a new agent.
 
+        Args:
+            name: Human-readable name of the agent. Does not need to be unique.
+
         Returns:
-            A tuple (agent_id, secret). Only a hash of the secret is kept,
+            A tuple (agent, secret). Only a hash of the secret is kept,
             so it cannot be shown again.
         """
-        agent_id = str(uuid.uuid4())
         secret = secrets.token_urlsafe(32)
-        self.agents[agent_id] = self._hasher.hash(secret)
-        return agent_id, secret
+        agent = Agent(
+            id=str(uuid.uuid4()), name=name, secret_hash=self._hasher.hash(secret)
+        )
+        self.agents[agent.id] = agent
+        return agent, secret
 
     def authenticate(self, client_id: str, secret: str) -> Principal | None:
         """Return the principal for valid credentials, otherwise None."""
@@ -65,8 +79,8 @@ class Authenticator:
             if secrets.compare_digest(secret.encode(), self._admin_secret.encode()):
                 return Principal(id=ADMIN_ID, role=Role.ADMIN)
             return None
-        hashed = self.agents.get(client_id)
-        if hashed is not None and self._hasher.verify(secret, hashed):
+        agent = self.agents.get(client_id)
+        if agent is not None and self._hasher.verify(secret, agent.secret_hash):
             return Principal(id=client_id, role=Role.AGENT)
         return None
 

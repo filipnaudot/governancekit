@@ -40,11 +40,12 @@ login_admin() {
     ADMIN_TOKEN=$(_login admin "$secret") && echo "Logged in as admin"
 }
 
-# Register a new agent, log in as it and remember its token in $AGENT_TOKEN
+# Register a new agent (optional name), log in as it and remember its token in $AGENT_TOKEN
 register_agent() {
     local response
-    response=$(_post "$ADMIN_TOKEN" /agents)
-    AGENT_ID=$(echo "$response" | _field agent_id) && echo "AGENT_ID=$AGENT_ID"
+    response=$(_post "$ADMIN_TOKEN" /agents "{\"agent_name\": \"${1:-scenario-agent}\"}")
+    AGENT_ID=$(echo "$response" | python3 -c "import json,sys; print(json.load(sys.stdin)['agent_info']['agent_id'])")
+    echo "AGENT_ID=$AGENT_ID"
     AGENT_SECRET=$(echo "$response" | _field secret)
     AGENT_TOKEN=$(_login "$AGENT_ID" "$AGENT_SECRET") && echo "Logged in as agent"
 }
