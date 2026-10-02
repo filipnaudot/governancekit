@@ -108,6 +108,9 @@ class EndTraceResponse(BaseModel):
 class AgentListResponse(BaseModel):
     agents: list[AgentInfo]
 
+class AuditResponse(BaseModel):
+    auditLog: list[AuditEntry]
+
 # ---------- App ----------
 
 
@@ -176,6 +179,13 @@ def create_app(
         return TokenResponse(access_token=auth.create_token(principal))
 
     # --- Management ---
+
+    @app.get("/audit", tags=["management"], dependencies=[Depends(require_admin)])
+    def get_audit() -> AuditResponse:
+        """
+        Admin endpoint for checking the complete audit log.
+        """
+        return AuditResponse(auditLog=audit.entries)
 
     @app.get("/agents", tags=["management"], dependencies=[Depends(require_admin)])
     def return_known_agents() -> AgentListResponse:
