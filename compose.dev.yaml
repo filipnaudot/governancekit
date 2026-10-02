@@ -1,0 +1,12 @@
+# Development overrides: run the frontend from the working tree with hot reload.
+# Usage: docker compose -f compose.yaml -f compose.dev.yaml up --build
+services:
+  frontend:
+    build:
+      target: dev
+    ports: !override
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      # Keep the container's own node_modules instead of the host's
+      - /app/node_modules
