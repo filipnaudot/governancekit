@@ -21,6 +21,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import AwareDatetime, BaseModel, Field
 
+from api.audit import Action, AuditEntry, AuditLog
 from api.auth import Agent, Authenticator, Principal, Role
 from core.events import Event
 from core.monitor_registry import MonitorRegistry
@@ -76,7 +77,6 @@ class AddModelResponse(BaseModel):
 
 class StartTraceRequest(BaseModel):
     model_id: str
-    agent_id: str = Field(description="The agent allowed to check and commit")
 
 
 class TraceOut(BaseModel):
@@ -108,6 +108,9 @@ class EndTraceResponse(BaseModel):
 class AgentListResponse(BaseModel):
     agents: list[AgentInfo]
 
+class AuditResponse(BaseModel):
+    auditLog: list[AuditEntry]
+
 # ---------- App ----------
 
 
@@ -126,6 +129,9 @@ def create_app(
     registry = MonitorRegistry()
     auth = Authenticator(jwt_secret=jwt_secret, admin_secret=admin_secret)
     trace_agents: dict[str, str] = {}  # trace ID -> ID of the agent working on it
+
+    # Server logs trace starts/ends, checks and commits from agents
+    audit = AuditLog()
 
     # --- Auth ---
 
@@ -174,11 +180,18 @@ def create_app(
 
     # --- Management ---
 
+    @app.get("/audit", tags=["management"], dependencies=[Depends(require_admin)])
+    def get_audit() -> AuditResponse:
+        """
+        Admin endpoint for checking the complete audit log currently recorded.
+        """
+        return AuditResponse(auditLog=audit.entries)
+
     @app.get("/agents", tags=["management"], dependencies=[Depends(require_admin)])
     def return_known_agents() -> AgentListResponse:
         """
         Admin endpoint. Returns the known agents from the server's memory.
-        The function could be extended to return more properties about the agents. Do so by changing the .of method of AgnetInfo.
+        The function could be extended to return more properties about the agents. Do so by changing the .of method of AgentInfo.
         """
         return AgentListResponse(
             agents=[AgentInfo.of(agent) for agent in auth.agents.values()]
@@ -215,31 +228,41 @@ def create_app(
             ) from e
         return AddModelResponse(model_id=model_id)
 
-    @app.post(
-        "/traces",
-        status_code=status.HTTP_201_CREATED,
-        tags=["management"],
-        dependencies=[Depends(require_agent)],
-    )
-    def start_trace(body: StartTraceRequest) -> TraceOut:
-        if body.agent_id not in auth.agents:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND, f"Unknown agent: {body.agent_id!r}"
-            )
+    # --- Runtime ---
+    """
+    TODO For Start trace the server should allocate memory for a log object which are going to remember what agents has tried to check and commit to the server.
+    """
+    @app.post("/traces", status_code=status.HTTP_201_CREATED, tags=["runtime"])
+    def start_trace(
+        body: StartTraceRequest,
+        agent: Annotated[Principal, Depends(require_agent)],
+    ) -> TraceOut:
+        """Start a trace on a model. The calling agent becomes its owner."""
         trace_id = str(uuid.uuid4())
         try:
             registry.start_monitor(model_id=body.model_id, trace_id=trace_id)
         except KeyError as e:
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"Unknown model: {e}") from e
-        trace_agents[trace_id] = body.agent_id
-        return TraceOut(trace_id=trace_id, model_id=body.model_id, agent_id=body.agent_id)
+        trace_agents[trace_id] = agent.id
 
-    @app.post(
-        "/traces/{trace_id}/end",
-        tags=["management"],
-        dependencies=[Depends(require_agent)],
-    )
-    def end_trace(trace_id: str) -> EndTraceResponse:
+        # Log start trace as an action in audit log.
+        audit.add_audit(
+            AuditEntry(
+                received_at=datetime.now(UTC),
+                agent_id=agent.id,
+                trace_id=trace_id,
+                action=Action.START_TRACE,
+            )
+        )
+        return TraceOut(trace_id=trace_id, model_id=body.model_id, agent_id=agent.id)
+
+    @app.post("/traces/{trace_id}/end", tags=["runtime"])
+    def end_trace(
+        trace_id: str,
+        agent: Annotated[Principal, Depends(require_agent)],
+    ) -> EndTraceResponse:
+        """End one of the calling agent's traces and return the final verdict."""
+        check_trace_owner(trace_id, agent)
         try:
             violations = registry.violations(trace_id=trace_id)
             registry.end_monitor(trace_id=trace_id)
@@ -248,13 +271,21 @@ def create_app(
                 status.HTTP_404_NOT_FOUND, f"Trace not found: {e}"
             ) from e
         trace_agents.pop(trace_id, None)
+
+        audit.add_audit(
+            AuditEntry(
+                received_at=datetime.now(UTC),
+                agent_id=agent.id,
+                trace_id=trace_id,
+                action=Action.END_TRACE,
+                violations=violations,
+            )
+        )
         return EndTraceResponse(
             trace_id=trace_id,
             conformant=not violations,
             violations=violations,
         )
-
-    # --- Runtime ---
 
     @app.post("/traces/{trace_id}/check", tags=["runtime"])
     def check(
@@ -272,6 +303,19 @@ def create_app(
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, f"Trace not found: {e}"
             ) from e
+
+        audit.add_audit(
+            AuditEntry(
+                received_at=datetime.now(UTC),
+                agent_id=agent.id,
+                trace_id=trace_id,
+                action=Action.CHECK,
+                activity=body.activity,
+                event_timestamp=body.timestamp,
+                allowed=allowed,
+                violations=violations,
+            )
+        )
         return CheckResponse(allowed=allowed, violations=violations)
 
     @app.post(
@@ -294,6 +338,17 @@ def create_app(
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, f"Trace not found: {e}"
             ) from e
+
+        audit.add_audit(
+            AuditEntry(
+                received_at=datetime.now(UTC),
+                agent_id=agent.id,
+                trace_id=trace_id,
+                action=Action.COMMIT,
+                activity=body.activity,
+                event_timestamp=body.timestamp,
+            )
+        )
 
     return app
 

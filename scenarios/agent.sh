@@ -1,12 +1,15 @@
-# Helper functions for acting as an agent against the GovernanceKit server.
+# Helper functions for acting as an admin or an agent against the GovernanceKit server.
 # Usage (from the repo root):
 #   source scenarios/agent.sh      # admin secret: $GK_ADMIN_SECRET or .env
 #   login_admin
 #   register_agent
+#   login_agent
 #   load_model scenarios/support_agent.decl
 #   start_trace
 #   act view_account
 #   end_trace
+#   list_agents                    # admin: known agents
+#   show_audit [TRACE_ID]          # admin: audit log, optionally for one trace
 
 BASE="${BASE:-http://localhost:8000}"
 
@@ -30,6 +33,11 @@ _pretty() {
     python3 -m json.tool
 }
 
+# _get TOKEN PATH
+_get() {
+    curl -s "$BASE$2" -H "Authorization: Bearer $1"
+}
+
 # Log in as admin with $GK_ADMIN_SECRET (read from .env if unset) and
 # remember the token in $ADMIN_TOKEN
 login_admin() {
@@ -40,14 +48,22 @@ login_admin() {
     ADMIN_TOKEN=$(_login admin "$secret") && echo "Logged in as admin"
 }
 
-# Register a new agent (optional name), log in as it and remember its token in $AGENT_TOKEN
+# As admin: register a new agent (optional name) and remember its
+# credentials in $AGENT_ID and $AGENT_SECRET. Does not log in as the agent.
 register_agent() {
     local response
     response=$(_post "$ADMIN_TOKEN" /agents "{\"agent_name\": \"${1:-scenario-agent}\"}")
     AGENT_ID=$(echo "$response" | python3 -c "import json,sys; print(json.load(sys.stdin)['agent_info']['agent_id'])")
     echo "AGENT_ID=$AGENT_ID"
     AGENT_SECRET=$(echo "$response" | _field secret)
-    AGENT_TOKEN=$(_login "$AGENT_ID" "$AGENT_SECRET") && echo "Logged in as agent"
+}
+
+# As agent: log in with $AGENT_ID and $AGENT_SECRET (or the ID and secret
+# given as arguments) and remember the token in $AGENT_TOKEN
+login_agent() {
+    AGENT_ID="${1:-$AGENT_ID}"
+    AGENT_SECRET="${2:-$AGENT_SECRET}"
+    AGENT_TOKEN=$(_login "$AGENT_ID" "$AGENT_SECRET") && echo "Logged in as agent $AGENT_ID"
 }
 
 # Upload a .decl file as a model and remember its id in $MODEL
@@ -59,11 +75,10 @@ load_model() {
     MODEL=$(echo "$response" | _field model_id) && echo "MODEL=$MODEL"
 }
 
-# Start a new trace (one agent run) on $MODEL for $AGENT_ID and remember its id in $TRACE
+# Start a new trace (one agent run) on $MODEL as the agent and remember its id in $TRACE
 start_trace() {
     local response
-    response=$(_post "$ADMIN_TOKEN" /traces \
-        "{\"model_id\": \"$MODEL\", \"agent_id\": \"$AGENT_ID\"}")
+    response=$(_post "$AGENT_TOKEN" /traces "{\"model_id\": \"$MODEL\"}")
     echo "$response" | _pretty
     TRACE=$(echo "$response" | _field trace_id) && echo "TRACE=$TRACE"
 }
@@ -96,5 +111,60 @@ act() {
 
 # Finish the run and get the final verdict
 end_trace() {
-    _post "$ADMIN_TOKEN" "/traces/$TRACE/end" | _pretty
+    _post "$AGENT_TOKEN" "/traces/$TRACE/end" | _pretty
+}
+
+# --- Admin: inspect the server ---
+
+# Print the agents the server knows about
+list_agents() {
+    _get "$ADMIN_TOKEN" /agents | python3 -c '
+import json, sys
+
+data = json.load(sys.stdin)
+if "agents" not in data:
+    sys.exit("Error: " + str(data.get("detail", data)) + " (try login_admin)")
+print(str(len(data["agents"])) + " known agent(s)")
+for agent in data["agents"]:
+    print("  " + agent["agent_id"] + "  " + agent["agent_name"])
+'
+}
+
+# Print the audit log as a table; pass a trace ID to show only that trace
+show_audit() {
+    AUDIT_JSON=$(_get "$ADMIN_TOKEN" /audit) \
+    AGENTS_JSON=$(_get "$ADMIN_TOKEN" /agents) \
+    TRACE_FILTER="${1:-}" \
+    python3 -c '
+import json, os, sys
+
+audit = json.loads(os.environ["AUDIT_JSON"])
+if "auditLog" not in audit:
+    sys.exit("Error: " + str(audit.get("detail", audit)) + " (try login_admin)")
+agents = json.loads(os.environ["AGENTS_JSON"]).get("agents", [])
+names = {a["agent_id"]: a["agent_name"] for a in agents}
+trace = os.environ["TRACE_FILTER"]
+entries = [e for e in audit["auditLog"] if not trace or e["trace_id"] == trace]
+
+def result(e):
+    if e["action"] == "check":
+        verdict = "ALLOWED" if e["allowed"] else "BLOCKED"
+        return verdict + "".join("  " + v for v in e["violations"])
+    if e["action"] == "end_trace":
+        return "conformant" if not e["violations"] else "VIOLATED  " + "  ".join(e["violations"])
+    return ""
+
+row = "{:<12}  {:<16}  {:<8}  {:<11}  {:<16}  {}"
+print(row.format("TIME", "AGENT", "TRACE", "ACTION", "ACTIVITY", "RESULT"))
+for e in entries:
+    print(row.format(
+        e["received_at"][11:23],
+        names.get(e["agent_id"], e["agent_id"][:8])[:16],
+        e["trace_id"][:8],
+        e["action"],
+        e["activity"] or "",
+        result(e),
+    ))
+print(str(len(entries)) + " entr" + ("y" if len(entries) == 1 else "ies"))
+'
 }
