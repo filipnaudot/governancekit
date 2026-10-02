@@ -1,8 +1,5 @@
 # My own
-.gitignore
-Dockerfile
 rebuild.sh
-.dockerignore
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

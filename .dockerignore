@@ -1,0 +1,9 @@
+# The API image only needs pyproject.toml, src/ and api/
+.git
+.venv
+frontend
+tests
+docs
+.benchmarks
+.pytest_cache
+**/__pycache__
