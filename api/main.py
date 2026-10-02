@@ -18,6 +18,7 @@ from typing import Annotated, Any
 
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import AwareDatetime, BaseModel, Field
 
@@ -349,6 +350,14 @@ def create_app(
                 event_timestamp=body.timestamp,
             )
         )
+
+    # Let the frontend call the API.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://localhost:3000"],
+        allow_methods=["*"],
+        allow_headers=["*"],   # needed so the browser may send Authorization
+    )
 
     return app
 

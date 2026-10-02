@@ -64,6 +64,7 @@ docker compose down --remove-orphans >/dev/null 2>&1 || true
 
 echo "==> Building and starting the frontend on port $FRONTEND_PORT"
 docker compose up --build -d
+# docker compose -f compose.yaml -f compose.dev.yaml up --build
 
 if ! wait_for "frontend" "http://localhost:$FRONTEND_PORT"; then
     echo "!! Frontend did not respond. Container logs:"
