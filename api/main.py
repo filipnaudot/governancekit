@@ -183,7 +183,7 @@ def create_app(
     @app.get("/audit", tags=["management"], dependencies=[Depends(require_admin)])
     def get_audit() -> AuditResponse:
         """
-        Admin endpoint for checking the complete audit log.
+        Admin endpoint for checking the complete audit log currently recorded.
         """
         return AuditResponse(auditLog=audit.entries)
 
