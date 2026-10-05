@@ -10,12 +10,12 @@ from datetime import UTC, datetime
 import pytest
 from conftest import init_def, precedence_def
 
-from core.conditions import create_correlation_condition
-from core.decision import Decision
-from core.events import Event
-from core.mp_declare_model import ConstraintDef, MPDeclareModel
-from core.templates import Template
-from core.trace_monitor import TraceMonitor
+from governancekit.engine.conditions import create_correlation_condition
+from governancekit.engine.decision import Decision
+from governancekit.engine.events import Event
+from governancekit.engine.mp_declare_model import ConstraintDef, MPDeclareModel
+from governancekit.engine.templates import Template
+from governancekit.engine.trace_monitor import TraceMonitor
 
 SIZES = [1, 10, 100, 1000]
 NOW = datetime.now(UTC)

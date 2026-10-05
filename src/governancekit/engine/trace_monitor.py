@@ -7,11 +7,11 @@ Applies an MPDeclareModel to a trace.
 import uuid
 from datetime import UTC, datetime
 
-from core.constraint_factory import build_instance
-from core.constraints.base import Verdict
-from core.decision import Decision
-from core.events import Event
-from core.mp_declare_model import MPDeclareModel
+from governancekit.engine.constraint_factory import build_instance
+from governancekit.engine.constraints.base import Verdict
+from governancekit.engine.decision import Decision
+from governancekit.engine.events import Event
+from governancekit.engine.mp_declare_model import MPDeclareModel
 
 
 class TraceMonitor:

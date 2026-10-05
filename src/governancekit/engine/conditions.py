@@ -9,7 +9,7 @@ from collections.abc import Callable
 from datetime import timedelta
 from types import FunctionType
 
-from core.events import Event
+from governancekit.engine.events import Event
 
 __all__ = [
     "ConditionSyntaxError",

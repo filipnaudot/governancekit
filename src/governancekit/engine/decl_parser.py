@@ -5,14 +5,14 @@ Text-to-MP-DECLARE parser
 import re
 from collections import defaultdict
 
-from core.conditions import (
+from governancekit.engine.conditions import (
     ConditionSyntaxError,
     create_activation_condition,
     create_correlation_condition,
     create_time_condition,
 )
-from core.mp_declare_model import ConstraintDef
-from core.templates import Template
+from governancekit.engine.mp_declare_model import ConstraintDef
+from governancekit.engine.templates import Template
 
 """
 For a line "Constraint[A, B] | ActCond | CorrCond | Deadline" it filters:

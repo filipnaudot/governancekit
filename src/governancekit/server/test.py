@@ -4,7 +4,6 @@ from fastapi import FastAPI
 app = FastAPI()
 
 
-
 @app.get("/weather/{city}")
 def get_weather(city: str):
     # In a real app you'd look this up in a database
@@ -16,8 +15,7 @@ def get_weather(city: str):
 def say_something(something: str):
     return {"promt": something}
 
+
 @app.get("/test2/{something}")
 def say_something2(something: str):
     return {"promt2": something}
-
-

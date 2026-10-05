@@ -27,13 +27,15 @@ class AuditEntry:
     One audited request. Frozen, so an entry cannot be changed once recorded.
     """
 
-    received_at: datetime                   # Set by the server
-    agent_id: str                           # The agent working on the trace
+    received_at: datetime  # Set by the server
+    agent_id: str  # The agent working on the trace
     trace_id: str
     action: Action
-    activity: str | None = None             # None for start/end trace
-    event_timestamp: datetime | None = None  # What the agent sent; None for start/end trace
-    allowed: bool | None = None             # Only set for check
+    activity: str | None = None  # None for start/end trace
+    event_timestamp: datetime | None = (
+        None  # What the agent sent; None for start/end trace
+    )
+    allowed: bool | None = None  # Only set for check
     violations: list[str] = field(default_factory=list)  # For check and end trace
 
 

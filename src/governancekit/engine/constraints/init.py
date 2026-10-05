@@ -7,10 +7,10 @@ Satisfied if trace starts with the given activity
 from collections.abc import Mapping
 from datetime import datetime
 
-from core.constraints.base import Verdict
-from core.decision import Decision
-from core.events import Event
-from core.mp_declare_model import ConstraintDef
+from governancekit.engine.constraints.base import Verdict
+from governancekit.engine.decision import Decision
+from governancekit.engine.events import Event
+from governancekit.engine.mp_declare_model import ConstraintDef
 
 
 class InitInstance:

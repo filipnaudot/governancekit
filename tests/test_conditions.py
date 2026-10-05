@@ -2,13 +2,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from core.conditions import (
+from governancekit.engine.conditions import (
     ConditionSyntaxError,
     create_activation_condition,
     create_correlation_condition,
     create_time_condition,
 )
-from core.events import Event
+from governancekit.engine.events import Event
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
 

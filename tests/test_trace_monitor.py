@@ -3,11 +3,11 @@ from datetime import UTC, datetime
 import pytest
 from conftest import precedence_def
 
-from core.conditions import create_activation_condition, create_correlation_condition
-from core.events import Event
-from core.mp_declare_model import ConstraintDef, MPDeclareModel
-from core.templates import Template
-from core.trace_monitor import TraceMonitor
+from governancekit.engine.conditions import create_activation_condition, create_correlation_condition
+from governancekit.engine.events import Event
+from governancekit.engine.mp_declare_model import ConstraintDef, MPDeclareModel
+from governancekit.engine.templates import Template
+from governancekit.engine.trace_monitor import TraceMonitor
 
 
 def _model(n: int) -> MPDeclareModel:

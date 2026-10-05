@@ -1,5 +1,5 @@
-from core.mp_declare_model import ConstraintDef
-from core.templates import Template
+from governancekit.engine.mp_declare_model import ConstraintDef
+from governancekit.engine.templates import Template
 
 
 def existence_def(activation: str, id: str) -> ConstraintDef:

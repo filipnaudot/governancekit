@@ -1,6 +1,6 @@
 from conftest import existence_def, init_def, precedence_def
 
-from core.mp_declare_model import MPDeclareModel
+from governancekit.engine.mp_declare_model import MPDeclareModel
 
 
 def test_finish_index():

@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from core.decision import Decision
-from core.events import Event
-from core.monitor_registry import MonitorRegistry
+from governancekit.engine.decision import Decision
+from governancekit.engine.events import Event
+from governancekit.engine.monitor_registry import MonitorRegistry
 
 MODEL = """
     activity authorize
