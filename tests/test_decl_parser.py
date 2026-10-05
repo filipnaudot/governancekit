@@ -1,7 +1,7 @@
 import pytest
 
-from core.decl_parser import parse_decl_text
-from core.templates import Template
+from governancekit.engine.decl_parser import parse_decl_text
+from governancekit.engine.templates import Template
 
 
 def test_parse_unary():

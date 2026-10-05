@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.main import create_app
+from governancekit.server.main import create_app
 
 JWT_SECRET = "test-jwt-secret-that-is-at-least-32-bytes"
 ADMIN_SECRET = "test-admin-secret"

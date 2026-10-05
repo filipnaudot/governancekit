@@ -7,8 +7,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Protocol
 
-from core.decision import Decision
-from core.events import Event
+from governancekit.engine.decision import Decision
+from governancekit.engine.events import Event
 
 
 class Verdict(Enum):

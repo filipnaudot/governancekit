@@ -1,4 +1,4 @@
-# The API image only needs pyproject.toml, src/ and api/
+# The API image only needs pyproject.toml and src/
 .git
 .venv
 frontend

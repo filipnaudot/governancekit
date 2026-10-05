@@ -9,11 +9,11 @@ at the same time.
 import threading
 from datetime import datetime
 
-from core.decision import Decision
-from core.decl_parser import parse_decl_text
-from core.events import Event
-from core.mp_declare_model import ConstraintDef, MPDeclareModel
-from core.trace_monitor import TraceMonitor
+from governancekit.engine.decision import Decision
+from governancekit.engine.decl_parser import parse_decl_text
+from governancekit.engine.events import Event
+from governancekit.engine.mp_declare_model import ConstraintDef, MPDeclareModel
+from governancekit.engine.trace_monitor import TraceMonitor
 
 
 class MonitorRegistry:

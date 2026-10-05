@@ -7,8 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Self
 
-from core.events import Event
-from core.templates import Template
+from governancekit.engine.events import Event
+from governancekit.engine.templates import Template
 
 # Can never be permanently violated by an event, so never block an activity from beginning
 NEVER_BLOCKING_TEMPLATES = frozenset(

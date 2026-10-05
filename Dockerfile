@@ -4,16 +4,13 @@ FROM python:3.12-slim
 # All following commands run inside /app in the container
 WORKDIR /app
 
-# Install the project and its dependencies (fastapi, uvicorn)
+# Install the project (engine and server) and its dependencies (fastapi, uvicorn)
 COPY pyproject.toml ./
 COPY src/ ./src/
 RUN pip install --no-cache-dir .
-
-# Copy the API code
-COPY api/ ./api/
 
 # Document the port the server listens on
 EXPOSE 8000
 
 # Command that runs when the container starts
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "governancekit.server.main:app", "--host", "0.0.0.0", "--port", "8000"]

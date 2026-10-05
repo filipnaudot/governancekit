@@ -28,6 +28,7 @@ class Role(StrEnum):
 @dataclass(frozen=True)
 class Principal:
     """The authenticated caller of a request."""
+
     id: str
     role: Role
 

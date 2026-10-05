@@ -21,10 +21,10 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import AwareDatetime, BaseModel, Field
 
-from api.audit import Action, AuditEntry, AuditLog
-from api.auth import Agent, Authenticator, Principal, Role
-from core.events import Event
-from core.monitor_registry import MonitorRegistry
+from governancekit.engine.events import Event
+from governancekit.engine.monitor_registry import MonitorRegistry
+from governancekit.server.audit import Action, AuditEntry, AuditLog
+from governancekit.server.auth import Agent, Authenticator, Principal, Role
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ class RegisterAgentRequest(BaseModel):
     MVP class for agent registry.
     TODO Find out what information is interesting about an agent.
     """
+
     agent_name: str
 
 
@@ -108,8 +109,10 @@ class EndTraceResponse(BaseModel):
 class AgentListResponse(BaseModel):
     agents: list[AgentInfo]
 
+
 class AuditResponse(BaseModel):
     auditLog: list[AuditEntry]
+
 
 # ---------- App ----------
 
@@ -232,6 +235,7 @@ def create_app(
     """
     TODO For Start trace the server should allocate memory for a log object which are going to remember what agents has tried to check and commit to the server.
     """
+
     @app.post("/traces", status_code=status.HTTP_201_CREATED, tags=["runtime"])
     def start_trace(
         body: StartTraceRequest,
