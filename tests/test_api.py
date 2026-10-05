@@ -80,6 +80,26 @@ def _start_trace(agent: TestClient, model_id: str) -> str:
     return response.json()["trace_id"]
 
 
+def _begin(agent: TestClient, trace_id: str, activity: str) -> dict:
+    response = agent.post(f"/traces/{trace_id}/activities", json={"activity": activity})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _finish(agent: TestClient, trace_id: str, instance_id: str, status: str) -> None:
+    response = agent.post(
+        f"/traces/{trace_id}/activities/{instance_id}/finish", json={"status": status}
+    )
+    assert response.status_code == 204, response.text
+
+
+def _complete(agent: TestClient, trace_id: str, activity: str) -> None:
+    """Begin an activity that must be allowed, and finish it as completed."""
+    begun = _begin(agent, trace_id, activity)
+    assert begun["decision"] == "allowed"
+    _finish(agent, trace_id, begun["instance_id"], "completed")
+
+
 # ---------- Auth ----------
 
 
@@ -134,12 +154,14 @@ def test_admin_cannot_use_runtime_endpoints(client, agent):
 
     start = client.post("/traces", json={"model_id": model_id})
     check = client.post(f"/traces/{trace_id}/check", json={"activity": "login"})
-    commit = client.post(f"/traces/{trace_id}/commit", json={"activity": "login"})
+    begin = client.post(f"/traces/{trace_id}/activities", json={"activity": "login"})
+    running = client.get(f"/traces/{trace_id}/activities")
     end = client.post(f"/traces/{trace_id}/end")
 
     assert start.status_code == 403
     assert check.status_code == 403
-    assert commit.status_code == 403
+    assert begin.status_code == 403
+    assert running.status_code == 403
     assert end.status_code == 403
 
 
@@ -147,19 +169,33 @@ def test_agent_cannot_use_other_agents_trace(app, client, agent):
     other = _logged_in(app, *_register_agent(client))
     trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
 
+    instance_id = _begin(agent, trace_id, "login")["instance_id"]
+
     check = other.post(f"/traces/{trace_id}/check", json={"activity": "login"})
-    commit = other.post(f"/traces/{trace_id}/commit", json={"activity": "login"})
+    begin = other.post(f"/traces/{trace_id}/activities", json={"activity": "login"})
+    finish = other.post(
+        f"/traces/{trace_id}/activities/{instance_id}/finish",
+        json={"status": "completed"},
+    )
+    running = other.get(f"/traces/{trace_id}/activities")
     end = other.post(f"/traces/{trace_id}/end")
 
     assert check.status_code == 404
-    assert commit.status_code == 404
+    assert begin.status_code == 404
+    assert finish.status_code == 404
+    assert running.status_code == 404
     assert end.status_code == 404
     # The trace is still running for its owner
-    assert agent.post(f"/traces/{trace_id}/check", json={"activity": "login"}).status_code == 200
+    assert (
+        agent.post(f"/traces/{trace_id}/check", json={"activity": "login"}).status_code
+        == 200
+    )
 
 
 def test_started_trace_belongs_to_calling_agent(client, agent, agent_id):
-    response = agent.post("/traces", json={"model_id": _add_model(client, EXISTENCE_DECL)})
+    response = agent.post(
+        "/traces", json={"model_id": _add_model(client, EXISTENCE_DECL)}
+    )
 
     assert response.status_code == 201
     assert response.json()["agent_id"] == agent_id
@@ -171,10 +207,7 @@ def test_agent_works_on_parallel_traces(client, agent):
     second = _start_trace(agent, model_id)
 
     for trace_id in (first, second):
-        check = agent.post(f"/traces/{trace_id}/check", json={"activity": "login"})
-        commit = agent.post(f"/traces/{trace_id}/commit", json={"activity": "login"})
-        assert check.status_code == 200
-        assert commit.status_code == 204
+        _complete(agent, trace_id, "login")
 
 
 # ---------- Management ----------
@@ -280,12 +313,14 @@ def test_ended_trace_is_removed(client, agent):
     assert response.status_code == 404
 
 
-@pytest.mark.xfail(reason="TraceMonitor.analyze compares i.verdict without calling it")
+@pytest.mark.xfail(
+    reason="violations are constraint sources, not {'constraint_id': ...}"
+)
 def test_end_trace_reports_missing_existence(client, agent):
     model_id = _add_model(client, EXISTENCE_DECL)
     satisfied = _start_trace(agent, model_id)
     unsatisfied = _start_trace(agent, model_id)
-    agent.post(f"/traces/{satisfied}/commit", json={"activity": "login"})
+    _complete(agent, satisfied, "login")
 
     ok = agent.post(f"/traces/{satisfied}/end").json()
     missing = agent.post(f"/traces/{unsatisfied}/end").json()
@@ -307,15 +342,15 @@ def test_check_allowed(client, agent):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"allowed": True, "violations": []}
+    assert response.json() == {"decision": "allowed", "blocking": []}
 
 
-def test_commit_returns_204(client, agent):
+def test_check_does_not_reserve(client, agent):
     trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
 
-    response = agent.post(f"/traces/{trace_id}/commit", json={"activity": "login"})
+    agent.post(f"/traces/{trace_id}/check", json={"activity": "login"})
 
-    assert response.status_code == 204
+    assert agent.get(f"/traces/{trace_id}/activities").json() == {"activities": []}
 
 
 def test_check_on_unknown_trace_returns_404(agent):
@@ -332,16 +367,99 @@ def test_check_without_activity_returns_422(client, agent):
     assert response.status_code == 422
 
 
-@pytest.mark.xfail(reason="decl_parser: len(bracket_items != 2) breaks binary templates")
-def test_precedence_blocks_until_target_committed(client, agent):
+def test_begin_reserves_until_finish(client, agent):
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+
+    begun = _begin(agent, trace_id, "login")
+    running = agent.get(f"/traces/{trace_id}/activities").json()["activities"]
+
+    assert begun["decision"] == "allowed"
+    assert begun["blocking"] == []
+    assert [(a["instance_id"], a["activity"]) for a in running] == [
+        (begun["instance_id"], "login")
+    ]
+
+    _finish(agent, trace_id, begun["instance_id"], "completed")
+    assert agent.get(f"/traces/{trace_id}/activities").json() == {"activities": []}
+
+
+def test_precedence_decisions_follow_the_target(client, agent):
     trace_id = _start_trace(agent, _add_model(client, PRECEDENCE_DECL))
+    blocking = ["Precedence[authorize, delete] |||"]
 
-    blocked = agent.post(f"/traces/{trace_id}/check", json={"activity": "delete"})
-    agent.post(f"/traces/{trace_id}/commit", json={"activity": "authorize"})
-    allowed = agent.post(f"/traces/{trace_id}/check", json={"activity": "delete"})
-
-    assert blocked.json() == {
-        "allowed": False,
-        "violations": [{"constraint_id": "precedence_0"}],
+    assert _begin(agent, trace_id, "delete") == {
+        "decision": "denied",
+        "instance_id": None,
+        "blocking": blocking,
     }
-    assert allowed.json() == {"allowed": True, "violations": []}
+
+    authorize = _begin(agent, trace_id, "authorize")["instance_id"]
+    assert _begin(agent, trace_id, "delete")["decision"] == "wait"
+
+    _finish(agent, trace_id, authorize, "failed")
+    assert _begin(agent, trace_id, "delete")["decision"] == "denied"
+
+    _complete(agent, trace_id, "authorize")
+    assert _begin(agent, trace_id, "delete")["decision"] == "allowed"
+
+
+def test_finish_unknown_instance_returns_404(client, agent):
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+
+    response = agent.post(
+        f"/traces/{trace_id}/activities/nope/finish", json={"status": "completed"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_finish_with_unknown_status_returns_422(client, agent):
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+    instance_id = _begin(agent, trace_id, "login")["instance_id"]
+
+    response = agent.post(
+        f"/traces/{trace_id}/activities/{instance_id}/finish", json={"status": "done"}
+    )
+
+    assert response.status_code == 422
+
+
+def test_end_with_running_activities_returns_409(client, agent):
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+    _begin(agent, trace_id, "login")
+
+    response = agent.post(f"/traces/{trace_id}/end")
+
+    assert response.status_code == 409
+    # The trace is still there
+    assert agent.get(f"/traces/{trace_id}/activities").status_code == 200
+
+
+def test_end_with_abort_running_aborts_them(client, agent):
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+    instance_id = _begin(agent, trace_id, "login")["instance_id"]
+
+    response = agent.post(f"/traces/{trace_id}/end", params={"abort_running": True})
+
+    assert response.status_code == 200
+    assert response.json()["conformant"] is False  # login never completed
+    finishes = [
+        e for e in client.get("/audit").json()["auditLog"] if e["action"] == "finish"
+    ]
+    assert [(e["instance_id"], e["status"]) for e in finishes] == [
+        (instance_id, "aborted")
+    ]
+
+
+def test_audit_records_begin_and_finish(client, agent):
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+    _complete(agent, trace_id, "login")
+
+    log = client.get("/audit").json()["auditLog"]
+
+    begin, finish = (e for e in log if e["action"] in ("begin", "finish"))
+    assert (begin["decision"], begin["activity"]) == ("allowed", "login")
+    assert (finish["status"], finish["instance_id"]) == (
+        "completed",
+        begin["instance_id"],
+    )

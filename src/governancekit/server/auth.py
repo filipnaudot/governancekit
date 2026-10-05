@@ -1,8 +1,8 @@
 """
 Authentication for the GovernanceKit web server.
 
-Admins manage models, traces and agents. Agents can only check and commit
-events on traces assigned to them. Both log in at /token with an ID and a
+Admins manage models, traces and agents. Agents can only check, begin and
+finish activities on traces assigned to them. Both log in at /token with an ID and a
 secret and send the returned JWT as a bearer token.
 """
 

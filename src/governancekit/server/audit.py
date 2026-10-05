@@ -1,13 +1,15 @@
 """
 Audit log for the GovernanceKit web server.
 
-Records every trace started or ended by an admin and every event an agent
-checks or commits, so it can later be reviewed who did what and when.
+Records every trace started or ended by an agent and every activity an agent
+checks, begins or finishes, so it can later be reviewed who did what and when.
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+
+from governancekit.engine.decision import Decision
 
 
 class Action(StrEnum):
@@ -18,7 +20,18 @@ class Action(StrEnum):
     START_TRACE = "start_trace"
     END_TRACE = "end_trace"
     CHECK = "check"
-    COMMIT = "commit"
+    BEGIN = "begin"
+    FINISH = "finish"
+
+
+class ActivityStatus(StrEnum):
+    """
+    How a running activity ended. Only completed activities affect the constraints.
+    """
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    ABORTED = "aborted"
 
 
 @dataclass(frozen=True)
@@ -35,8 +48,10 @@ class AuditEntry:
     event_timestamp: datetime | None = (
         None  # What the agent sent; None for start/end trace
     )
-    allowed: bool | None = None  # Only set for check
-    violations: list[str] = field(default_factory=list)  # For check and end trace
+    decision: Decision | None = None  # Only set for check and begin
+    instance_id: str | None = None  # Set for an allowed begin, and for finish
+    status: ActivityStatus | None = None  # Only set for finish
+    violations: list[str] = field(default_factory=list)  # For check, begin and end trace
 
 
 class AuditLog:

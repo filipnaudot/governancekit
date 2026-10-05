@@ -3,11 +3,22 @@ from datetime import UTC, datetime
 import pytest
 from conftest import precedence_def
 
-from governancekit.engine.conditions import create_activation_condition, create_correlation_condition
+from governancekit.engine.conditions import (
+    create_activation_condition,
+    create_correlation_condition,
+)
+from governancekit.engine.decision import Decision
 from governancekit.engine.events import Event
 from governancekit.engine.mp_declare_model import ConstraintDef, MPDeclareModel
 from governancekit.engine.templates import Template
 from governancekit.engine.trace_monitor import TraceMonitor
+
+
+def _complete(monitor: TraceMonitor, event: Event) -> None:
+    """Begin an activity that must be allowed, and finish it as completed."""
+    decision, iid, _ = monitor.begin(event)
+    assert decision is Decision.ALLOWED
+    monitor.finish(iid, completed=True)
 
 
 def _model(n: int) -> MPDeclareModel:
@@ -72,7 +83,7 @@ def test_blocks_precedence_without_target():
     )
     monitor = TraceMonitor(model)
     decision = monitor.check(Event("delete", datetime.now(UTC)))
-    assert decision[0] == False
+    assert decision[0] is Decision.DENIED
     assert len(decision[1]) == 1
     assert decision[1][0] == "src1"
 
@@ -85,9 +96,9 @@ def test_allows_precedence_with_target():
         ]
     )
     monitor = TraceMonitor(model)
-    monitor.commit(Event("authorize_d", datetime.now(UTC)))
+    _complete(monitor, Event("authorize_d", datetime.now(UTC)))
     decision = monitor.check(Event("delete", datetime.now(UTC)))
-    assert decision[0] == True
+    assert decision[0] is Decision.ALLOWED
     assert len(decision[1]) == 0
 
 
@@ -95,7 +106,7 @@ def test_allows_precedence_with_target():
 @pytest.mark.parametrize("n_constraints", [1, 10, 100, 1000])
 def test_check_scaling(benchmark, n_constraints):
     monitor = TraceMonitor(_model(n_constraints))
-    monitor.commit(Event("authorize_0", datetime.now(UTC)))
+    _complete(monitor, Event("authorize_0", datetime.now(UTC)))
     e = Event("delete_0", datetime.now(UTC))
 
     benchmark(monitor.check, e)
@@ -106,7 +117,7 @@ def test_check_scaling(benchmark, n_constraints):
 def test_check_scaling_shared_activity(benchmark, n_constraints):
     monitor = TraceMonitor(_model_shared_activity(n_constraints))
     for i in range(n_constraints):
-        monitor.commit(Event(f"authorize_{i}", datetime.now(UTC)))
+        _complete(monitor, Event(f"authorize_{i}", datetime.now(UTC)))
     e = Event("delete", datetime.now(UTC))
 
     benchmark(monitor.check, e)
@@ -123,12 +134,16 @@ def test_check_scaling_shared_activity_with_conditions(
     for i in range(n_constraints):
         # Seen targets for another resource: stored, but rejected by the correlation condition.
         for _ in range(n_non_matching):
-            monitor.commit(
-                Event(f"authorize_{i}", now, {"resource": "db-2", "status": "approved"})
+            _complete(
+                monitor,
+                Event(
+                    f"authorize_{i}", now, {"resource": "db-2", "status": "approved"}
+                ),
             )
         # The matching target comes last, so check has to scan past the non-matching ones first.
-        monitor.commit(
-            Event(f"authorize_{i}", now, {"resource": "db-1", "status": "approved"})
+        _complete(
+            monitor,
+            Event(f"authorize_{i}", now, {"resource": "db-1", "status": "approved"}),
         )
     e = Event("delete", now, {"resource": "db-1", "risk": 9, "role": "admin"})
 
