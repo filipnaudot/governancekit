@@ -25,11 +25,8 @@ class MonitorRegistry:
 
     Typical use per activity: call begin_event. If it is ALLOWED, perform the
     activity and call finish_event with its instance id. If it is WAIT, ask
-    again later; if it is DENIED, don't perform it.
-
-    check_event and commit_event are the older one-step flow, kept for
-    compatibility. They don't see running activities, so don't mix them with
-    begin_event and finish_event on the same trace.
+    again later; if it is DENIED, don't perform it. check_event gives the same
+    decision without reserving anything.
 
     Thread-safe: it starts no threads itself, but may be called from several.
     Calls on the same trace run one at a time; different traces don't wait
@@ -183,22 +180,21 @@ class MonitorRegistry:
         with lock:
             return monitor.finish(instance_id, completed, completed_at)
 
-    def check_event(self, trace_id: str, event: Event) -> tuple[bool, list[str]]:
+    def check_event(self, trace_id: str, event: Event) -> tuple[Decision, list[str]]:
         """
-        Check whether an event can be committed without a permanent violation.
+        Check whether an activity may begin, without changing the trace.
 
-        Does not modify the trace. Temporary violations are allowed, since
-        they can still be resolved by later events. Kept for compatibility:
-        nothing is reserved, so prefer begin_event.
+        Gives the same decision as begin_event, but reserves nothing, so the
+        answer can be outdated by the time the caller acts. Call begin_event
+        before performing the activity.
 
         Args:
             trace_id: Key of the monitored trace.
-            event: Event to check.
+            event: The activity to check, with its final payload.
 
         Returns:
-            A tuple (allowed, violations). allowed is True if begin_event would
-            answer ALLOWED. violations holds the source text of the constraints
-            that don't allow it.
+            A tuple (decision, blocking). decision is ALLOWED, WAIT or DENIED.
+            blocking holds the source text of the constraints that don't allow it.
 
         Raises:
             KeyError: If trace_id is not being monitored.
@@ -210,18 +206,22 @@ class MonitorRegistry:
     def violations(self, trace_id: str) -> list[str]:
         """Check whether a trace currently violates its model.
 
+        Mid-trace this includes constraints that are not satisfied yet but
+        still could be; when the trace ends it is the final verdict.
+
         Args:
             trace_id: Key of the monitored trace.
 
         Returns:
-            List holding the source text of all constraints currently violated.
+            List holding the source text of all constraints that would be
+            violated if the trace ended now.
 
         Raises:
             KeyError: If trace_id is not being monitored.
         """
         monitor, lock = self._monitor(trace_id)
         with lock:
-            return monitor.analyze()
+            return monitor.violations()
 
     def unfinished(self, trace_id: str) -> dict[str, Event]:
         """Activities that have begun but not finished.
@@ -241,25 +241,6 @@ class MonitorRegistry:
         monitor, lock = self._monitor(trace_id)
         with lock:
             return monitor.unfinished()
-
-    def commit_event(self, trace_id: str, event: Event) -> None:
-        """Append an event to a monitored trace and update constraint states.
-
-        Does not check the event first. Call check_event beforehand to
-        reject events that would cause a permanent violation. Kept for
-        compatibility: the event completes instantly at its own timestamp,
-        bypassing running activities, so prefer begin_event and finish_event.
-
-        Args:
-            trace_id: Key of the monitored trace.
-            event: Event to append.
-
-        Raises:
-            KeyError: If trace_id is not being monitored.
-        """
-        monitor, lock = self._monitor(trace_id)
-        with lock:
-            monitor.commit(event)
 
     def _monitor(self, trace_id: str) -> tuple[TraceMonitor, threading.Lock]:
         """The trace's monitor and its lock. Raises KeyError if not monitored."""

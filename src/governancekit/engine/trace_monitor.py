@@ -36,17 +36,9 @@ class TraceMonitor:
         Returns the decision, the instance id (only if allowed) and the source
         of every constraint that did not allow it.
         """
-        decisions = [
-            (
-                self.instances[i].definition.source,
-                self.instances[i].can_begin(event, self.running, self.last_completed),
-            )
-            for i in self._begin_candidates(event)
-        ]
-        blocking = [source for source, d in decisions if d is not Decision.ALLOWED]
-        if blocking:
-            denied = any(d is Decision.DENIED for _, d in decisions)
-            return (Decision.DENIED if denied else Decision.WAIT), None, blocking
+        decision, blocking = self.check(event)
+        if decision is not Decision.ALLOWED:
+            return decision, None, blocking
 
         iid = str(uuid.uuid4())
         self.running.setdefault(event.activity, {})[iid] = event
@@ -75,25 +67,31 @@ class TraceMonitor:
             self.last_completed = event
         return event
 
-    def check(self, event: Event) -> tuple[bool, list[str]]:
-        """Like begin(), but reserves nothing. Kept for compatibility."""
-        violations = [
-            self.instances[i].definition.source
+    def check(self, event: Event) -> tuple[Decision, list[str]]:
+        """Decide if the event may begin now, without reserving anything.
+
+        Returns the decision begin() would give, and the source of every
+        constraint that does not allow it.
+        """
+        decisions = [
+            (
+                self.instances[i].definition.source,
+                self.instances[i].can_begin(event, self.running, self.last_completed),
+            )
             for i in self._begin_candidates(event)
-            if self.instances[i].can_begin(event, self.running, self.last_completed)
-            is not Decision.ALLOWED
         ]
-        return not violations, violations
+        blocking = [source for source, d in decisions if d is not Decision.ALLOWED]
+        if not blocking:
+            return Decision.ALLOWED, []
+        denied = any(d is Decision.DENIED for _, d in decisions)
+        return (Decision.DENIED if denied else Decision.WAIT), blocking
 
-    def commit(self, event: Event) -> None:
-        """Record a completed event without checking it or seeing running
-        activities. Kept for compatibility; don't mix with begin()/finish()."""
-        # A committed event is instantaneous: it completes at its own timestamp
-        for i in self._finish_candidates(event):
-            self.instances[i].on_finish(event, event.timestamp)
-        self.last_completed = event
+    def violations(self) -> list[str]:
+        """Sources of the constraints that would be violated if the trace ended now.
 
-    def analyze(self) -> list[str]:
+        Mid-trace this includes constraints that are not satisfied yet but
+        still could be, e.g. an Existence whose activity hasn't completed.
+        """
         return [
             i.definition.source
             for i in self.instances
@@ -103,7 +101,7 @@ class TraceMonitor:
     def unfinished(self) -> dict[str, Event]:
         """Activities that have begun but not finished (iid -> event).
 
-        They are not part of analyze(), since only completed activities count.
+        They are not part of violations(), since only completed activities count.
         """
         return dict(self._in_flight)
 

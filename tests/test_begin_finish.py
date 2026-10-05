@@ -7,7 +7,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from conftest import existence_def, init_def, precedence_def
 
-from governancekit.engine.conditions import create_correlation_condition, create_time_condition
+from governancekit.engine.conditions import (
+    create_correlation_condition,
+    create_time_condition,
+)
 from governancekit.engine.decision import Decision
 from governancekit.engine.events import Event
 from governancekit.engine.mp_declare_model import ConstraintDef, MPDeclareModel
@@ -86,7 +89,7 @@ def test_failed_activity_does_not_count():
 
     monitor.finish(iid, completed=False)
 
-    assert monitor.analyze() == ["placeholder"]
+    assert monitor.violations() == ["placeholder"]
     assert monitor.last_completed is None
 
 
@@ -94,7 +97,7 @@ def test_running_activity_does_not_count():
     monitor = _monitor(existence_def("close_ticket", "e"))
     _run(monitor, "close_ticket")
 
-    assert monitor.analyze() == ["placeholder"]
+    assert monitor.violations() == ["placeholder"]
 
 
 # ---------- Precedence ----------
@@ -166,7 +169,19 @@ def test_denied_wins_over_wait():
 
     assert decision is Decision.DENIED
     assert iid is None
-    assert sorted(blocking) == ["Precedence[authorize, delete]", "Precedence[backup, delete]"]
+    assert sorted(blocking) == [
+        "Precedence[authorize, delete]",
+        "Precedence[backup, delete]",
+    ]
+
+
+def test_check_gives_begin_decision_without_reserving():
+    monitor = _monitor(precedence_def("delete", "authorize", "p", PRECEDENCE))
+    _run(monitor, "authorize")
+
+    assert monitor.check(Event("delete", T0)) == (Decision.WAIT, [PRECEDENCE])
+    assert monitor.check(Event("view_account", T0)) == (Decision.ALLOWED, [])
+    assert set(monitor.running) == {"authorize"}
 
 
 # ---------- Init ----------
@@ -182,7 +197,7 @@ def test_init_only_allows_its_activity_before_first_completion():
 
     monitor.finish(login, completed=True)
     assert monitor.begin(Event("browse", T0))[0] is Decision.ALLOWED
-    assert monitor.analyze() == []
+    assert monitor.violations() == []
 
 
 def test_init_is_decided_by_first_completion_only():
@@ -193,4 +208,4 @@ def test_init_is_decided_by_first_completion_only():
     monitor.finish(first, completed=True)
     monitor.finish(second, completed=False)
 
-    assert monitor.analyze() == []
+    assert monitor.violations() == []

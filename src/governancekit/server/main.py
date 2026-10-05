@@ -1,8 +1,9 @@
 """
 GovernanceKit web server.
 
-Management endpoints: add/remove models, start/end traces.
-Runtime endpoints: check and commit agent actions against a trace.
+Management endpoints: register agents, add models, read the audit log.
+Runtime endpoints: start/end traces, and check, begin and finish activities.
+Several activities may run at the same time on one trace.
 
 Management endpoints require an admin token, runtime endpoints an agent
 token. The admin secret is read from GK_ADMIN_SECRET and the JWT signing key
@@ -21,9 +22,10 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import AwareDatetime, BaseModel, Field
 
+from governancekit.engine.decision import Decision
 from governancekit.engine.events import Event
 from governancekit.engine.monitor_registry import MonitorRegistry
-from governancekit.server.audit import Action, AuditEntry, AuditLog
+from governancekit.server.audit import Action, ActivityStatus, AuditEntry, AuditLog
 from governancekit.server.auth import Agent, Authenticator, Principal, Role
 
 logger = logging.getLogger(__name__)
@@ -96,8 +98,31 @@ class EventRequest(BaseModel):
 
 
 class CheckResponse(BaseModel):
-    allowed: bool
-    violations: list[str]
+    decision: Decision
+    blocking: list[str] = Field(description="Constraints that don't allow it")
+
+
+class BeginResponse(BaseModel):
+    decision: Decision
+    instance_id: str | None = Field(
+        description="Only set if allowed; needed to finish the activity"
+    )
+    blocking: list[str] = Field(description="Constraints that don't allow it")
+
+
+class FinishRequest(BaseModel):
+    status: ActivityStatus
+
+
+class RunningActivity(BaseModel):
+    instance_id: str
+    activity: str
+    payload: dict[str, Any]
+    timestamp: datetime = Field(description="When the activity began")
+
+
+class RunningActivitiesResponse(BaseModel):
+    activities: list[RunningActivity]
 
 
 class EndTraceResponse(BaseModel):
@@ -133,7 +158,7 @@ def create_app(
     auth = Authenticator(jwt_secret=jwt_secret, admin_secret=admin_secret)
     trace_agents: dict[str, str] = {}  # trace ID -> ID of the agent working on it
 
-    # Server logs trace starts/ends, checks and commits from agents
+    # Server logs trace starts/ends, and checked, begun and finished activities
     audit = AuditLog()
 
     # --- Auth ---
@@ -264,17 +289,40 @@ def create_app(
     def end_trace(
         trace_id: str,
         agent: Annotated[Principal, Depends(require_agent)],
+        abort_running: bool = False,
     ) -> EndTraceResponse:
-        """End one of the calling agent's traces and return the final verdict."""
+        """End one of the calling agent's traces and return the final verdict.
+
+        If activities are still running, the request is rejected with 409,
+        unless abort_running is true; then they are aborted first.
+        """
         check_trace_owner(trace_id, agent)
         try:
             violations = registry.violations(trace_id=trace_id)
-            registry.end_monitor(trace_id=trace_id)
+            aborted = registry.end_monitor(
+                trace_id=trace_id, abort_running=abort_running
+            )
         except KeyError as e:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, f"Trace not found: {e}"
             ) from e
+        except ValueError as e:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
         trace_agents.pop(trace_id, None)
+
+        for instance_id, event in aborted.items():
+            audit.add_audit(
+                AuditEntry(
+                    received_at=datetime.now(UTC),
+                    agent_id=agent.id,
+                    trace_id=trace_id,
+                    action=Action.FINISH,
+                    activity=event.activity,
+                    event_timestamp=event.timestamp,
+                    instance_id=instance_id,
+                    status=ActivityStatus.ABORTED,
+                )
+            )
 
         audit.add_audit(
             AuditEntry(
@@ -297,12 +345,17 @@ def create_app(
         body: EventRequest,
         agent: Annotated[Principal, Depends(require_agent)],
     ) -> CheckResponse:
+        """Ask whether an activity may begin now, without reserving it.
+
+        The answer can be outdated by the time the agent acts; begin the
+        activity before performing it.
+        """
         check_trace_owner(trace_id, agent)
         event = Event(
             activity=body.activity, timestamp=body.timestamp, payload=body.payload
         )
         try:
-            allowed, violations = registry.check_event(trace_id=trace_id, event=event)
+            decision, blocking = registry.check_event(trace_id=trace_id, event=event)
         except KeyError as e:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, f"Trace not found: {e}"
@@ -316,28 +369,31 @@ def create_app(
                 action=Action.CHECK,
                 activity=body.activity,
                 event_timestamp=body.timestamp,
-                allowed=allowed,
-                violations=violations,
+                decision=decision,
+                violations=blocking,
             )
         )
-        return CheckResponse(allowed=allowed, violations=violations)
+        return CheckResponse(decision=decision, blocking=blocking)
 
-    @app.post(
-        "/traces/{trace_id}/commit",
-        status_code=status.HTTP_204_NO_CONTENT,
-        tags=["runtime"],
-    )
-    def commit(
+    @app.post("/traces/{trace_id}/activities", tags=["runtime"])
+    def begin(
         trace_id: str,
         body: EventRequest,
         agent: Annotated[Principal, Depends(require_agent)],
-    ) -> None:
+    ) -> BeginResponse:
+        """Ask to begin an activity, and reserve it if allowed.
+
+        allowed: perform it, then finish it with the returned instance_id.
+        wait: not now, ask again later. denied: don't perform it.
+        """
         check_trace_owner(trace_id, agent)
         event = Event(
             activity=body.activity, timestamp=body.timestamp, payload=body.payload
         )
         try:
-            registry.commit_event(trace_id=trace_id, event=event)
+            decision, instance_id, blocking = registry.begin_event(
+                trace_id=trace_id, event=event
+            )
         except KeyError as e:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, f"Trace not found: {e}"
@@ -348,10 +404,78 @@ def create_app(
                 received_at=datetime.now(UTC),
                 agent_id=agent.id,
                 trace_id=trace_id,
-                action=Action.COMMIT,
+                action=Action.BEGIN,
                 activity=body.activity,
                 event_timestamp=body.timestamp,
+                decision=decision,
+                instance_id=instance_id,
+                violations=blocking,
             )
+        )
+        return BeginResponse(
+            decision=decision, instance_id=instance_id, blocking=blocking
+        )
+
+    @app.post(
+        "/traces/{trace_id}/activities/{instance_id}/finish",
+        status_code=status.HTTP_204_NO_CONTENT,
+        tags=["runtime"],
+    )
+    def finish(
+        trace_id: str,
+        instance_id: str,
+        body: FinishRequest,
+        agent: Annotated[Principal, Depends(require_agent)],
+    ) -> None:
+        """Report how a running activity ended. Only completed ones count."""
+        check_trace_owner(trace_id, agent)
+        try:
+            event = registry.finish_event(
+                trace_id=trace_id,
+                instance_id=instance_id,
+                completed=body.status is ActivityStatus.COMPLETED,
+            )
+        except KeyError as e:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, f"Trace or activity not found: {e}"
+            ) from e
+
+        audit.add_audit(
+            AuditEntry(
+                received_at=datetime.now(UTC),
+                agent_id=agent.id,
+                trace_id=trace_id,
+                action=Action.FINISH,
+                activity=event.activity,
+                event_timestamp=event.timestamp,
+                instance_id=instance_id,
+                status=body.status,
+            )
+        )
+
+    @app.get("/traces/{trace_id}/activities", tags=["runtime"])
+    def running_activities(
+        trace_id: str,
+        agent: Annotated[Principal, Depends(require_agent)],
+    ) -> RunningActivitiesResponse:
+        """Activities that have begun but not finished on this trace."""
+        check_trace_owner(trace_id, agent)
+        try:
+            running = registry.unfinished(trace_id=trace_id)
+        except KeyError as e:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, f"Trace not found: {e}"
+            ) from e
+        return RunningActivitiesResponse(
+            activities=[
+                RunningActivity(
+                    instance_id=instance_id,
+                    activity=event.activity,
+                    payload=event.payload,
+                    timestamp=event.timestamp,
+                )
+                for instance_id, event in running.items()
+            ]
         )
 
     return app

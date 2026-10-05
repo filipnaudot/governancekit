@@ -88,7 +88,9 @@ def test_concurrent_calls_on_one_trace(registry):
                 decision, iid, _ = registry.begin_event("trace", _event("login"))
                 assert decision is Decision.ALLOWED
                 registry.finish_event("trace", iid, completed=True)
-        except Exception as e:  # collected, since exceptions in threads don't fail the test
+        except (
+            Exception
+        ) as e:  # collected, since exceptions in threads don't fail the test
             errors.append(e)
 
     threads = [threading.Thread(target=agent) for _ in range(8)]

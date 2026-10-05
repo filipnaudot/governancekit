@@ -6,8 +6,11 @@
 #   login_agent
 #   load_model scenarios/support_agent.decl
 #   start_trace
-#   act view_account
-#   end_trace
+#   act view_account               # begin, and finish as completed if allowed
+#   begin approve_refund           # begin only; leaves it running in $INSTANCE
+#   running                        # activities that have begun but not finished
+#   finish failed                  # finish $INSTANCE: completed (default), failed or aborted
+#   end_trace                      # or: end_trace abort, to abort running activities
 #   list_agents                    # admin: known agents
 #   show_audit [TRACE_ID]          # admin: audit log, optionally for one trace
 
@@ -83,35 +86,53 @@ start_trace() {
     TRACE=$(echo "$response" | _field trace_id) && echo "TRACE=$TRACE"
 }
 
-# Ask whether an activity is allowed right now (does not record anything)
+# Ask whether an activity may begin right now (does not reserve anything)
 check() {
     _post "$AGENT_TOKEN" "/traces/$TRACE/check" "{\"activity\": \"$1\"}" | _pretty
 }
 
-# Record that an activity was performed
-commit() {
-    curl -s -o /dev/null -w "commit $1 -> HTTP %{http_code}\n" -X POST \
-        "$BASE/traces/$TRACE/commit" -H "Authorization: Bearer $AGENT_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{\"activity\": \"$1\"}"
+# Ask to begin an activity; if allowed, remember its instance id in $INSTANCE
+begin() {
+    local response
+    response=$(_post "$AGENT_TOKEN" "/traces/$TRACE/activities" "{\"activity\": \"$1\"}")
+    echo "$response" | _pretty
+    INSTANCE=$(echo "$response" | _field instance_id)
 }
 
-# Behave like a well-mannered agent: check first, only commit if allowed
+# Report how an activity ended: finish [STATUS] [INSTANCE_ID]
+# STATUS is completed (default), failed or aborted; INSTANCE_ID defaults to $INSTANCE
+finish() {
+    local status="${1:-completed}" instance="${2:-$INSTANCE}"
+    curl -s -o /dev/null -w "finish $instance $status -> HTTP %{http_code}\n" -X POST \
+        "$BASE/traces/$TRACE/activities/$instance/finish" \
+        -H "Authorization: Bearer $AGENT_TOKEN" -H "Content-Type: application/json" \
+        -d "{\"status\": \"$status\"}"
+}
+
+# List the activities that have begun but not finished
+running() {
+    _get "$AGENT_TOKEN" "/traces/$TRACE/activities" | _pretty
+}
+
+# Behave like a well-mannered agent: begin, and if allowed, perform and finish it
 act() {
-    local decision
-    decision=$(_post "$AGENT_TOKEN" "/traces/$TRACE/check" "{\"activity\": \"$1\"}")
-    if [ "$(echo "$decision" | _field allowed)" = "True" ]; then
+    local response decision
+    response=$(_post "$AGENT_TOKEN" "/traces/$TRACE/activities" "{\"activity\": \"$1\"}")
+    decision=$(echo "$response" | _field decision)
+    if [ "$decision" = "allowed" ]; then
         echo "ALLOWED  $1"
-        commit "$1"
+        finish completed "$(echo "$response" | _field instance_id)"
     else
-        echo "BLOCKED  $1"
-        echo "$decision" | _pretty
+        echo "$(echo "$decision" | tr '[:lower:]' '[:upper:]')  $1"
+        echo "$response" | _pretty
     fi
 }
 
-# Finish the run and get the final verdict
+# Finish the run and get the final verdict; pass "abort" to abort running activities
 end_trace() {
-    _post "$AGENT_TOKEN" "/traces/$TRACE/end" | _pretty
+    local query=""
+    [ "${1:-}" = "abort" ] && query="?abort_running=true"
+    _post "$AGENT_TOKEN" "/traces/$TRACE/end$query" | _pretty
 }
 
 # --- Admin: inspect the server ---
@@ -147,9 +168,10 @@ trace = os.environ["TRACE_FILTER"]
 entries = [e for e in audit["auditLog"] if not trace or e["trace_id"] == trace]
 
 def result(e):
-    if e["action"] == "check":
-        verdict = "ALLOWED" if e["allowed"] else "BLOCKED"
-        return verdict + "".join("  " + v for v in e["violations"])
+    if e["action"] in ("check", "begin"):
+        return e["decision"].upper() + "".join("  " + v for v in e["violations"])
+    if e["action"] == "finish":
+        return e["status"]
     if e["action"] == "end_trace":
         return "conformant" if not e["violations"] else "VIOLATED  " + "  ".join(e["violations"])
     return ""

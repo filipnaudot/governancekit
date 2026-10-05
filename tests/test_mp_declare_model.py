@@ -26,7 +26,11 @@ def test_constraint_groups():
     # Precedence can block both of its activities
     assert model.begin_index == {"delete": (0,), "authorize": (0,)}
     # Existence never blocks, but must hear about completions
-    assert model.finish_index == {"delete": (0,), "authorize": (0,), "close_ticket": (1,)}
+    assert model.finish_index == {
+        "delete": (0,),
+        "authorize": (0,),
+        "close_ticket": (1,),
+    }
     # Init concerns every activity, so it is in neither index
     assert model.ordering_constraints == (2,)
 
