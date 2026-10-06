@@ -230,9 +230,6 @@ def create_app(
         return AddModelResponse(model_id=model_id)
 
     # --- Runtime ---
-    """
-    TODO For Start trace the server should allocate memory for a log object which are going to remember what agents has tried to check and commit to the server.
-    """
     @app.post("/traces", status_code=status.HTTP_201_CREATED, tags=["runtime"])
     def start_trace(
         body: StartTraceRequest,
