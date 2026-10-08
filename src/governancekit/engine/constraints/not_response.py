@@ -1,7 +1,7 @@
 """
-MP-DECLARE Precedence constraint
+MP-DECLARE Not Response constraint
 
-Satisfied if every activation is preceded by a matching target.
+Satisfied if no activation is followed by a matching target.
 """
 
 from collections.abc import Mapping
@@ -14,10 +14,10 @@ from governancekit.engine.events import Event
 from governancekit.engine.mp_declare_model import ConstraintDef
 
 
-class PrecedenceInstance:
+class NotResponseInstance:
     def __init__(self, definition: ConstraintDef) -> None:
         self.definition = definition
-        self._targets: list[Event] = []
+        self._activations: list[Event] = []
         self._violated = False
         self._keep_all = (
             definition.correlation_condition is not None
@@ -30,42 +30,45 @@ class PrecedenceInstance:
         running: Mapping[str, Mapping[str, Event]],
     ) -> Decision:
         d = self.definition
-        if not self._is_activation(event) or any(
-            self._matches(event, t) for t in self._targets
-        ):
-            return Decision.ALLOWED
-        if any(
-            self._correlates(event, t) and self._too_early(t, event)
-            for t in self._targets
-        ):
-            return Decision.WAIT
-        if any(
-            self._correlates(event, t)
-            for t in running.get(d.target_activity, {}).values()
-        ):
-            return Decision.WAIT
-        return Decision.DENIED
+        if self._is_activation(event):
+            # A running target that began longer ago than the time window can't be in
+            # it, however soon this activation completes
+            if any(
+                self._correlates(event, t) and not self._too_late(t, event)
+                for t in running.get(d.target_activity, {}).values()
+            ):
+                return Decision.WAIT
+        elif event.activity == d.target_activity:
+            if any(self._matches(a, event) for a in self._activations):
+                # With a time condition, the block ends once its window has passed
+                return (
+                    Decision.WAIT if d.time_condition is not None else Decision.DENIED
+                )
+            if any(
+                self._is_activation(a) and self._correlates(a, event)
+                for a in running.get(d.activation_activity, {}).values()
+            ):
+                return Decision.WAIT
+        return Decision.ALLOWED
 
     def on_finish(self, event: Event, completed_at: datetime) -> None:
-        if self._is_activation(event) and not any(
-            self._matches(event, t) for t in self._targets
+        if event.activity == self.definition.target_activity and any(
+            self._matches(a, event) for a in self._activations
         ):
             self._violated = True
-        if event.activity == self.definition.target_activity and (
-            self._keep_all or not self._targets
-        ):
-            self._targets.append(replace(event, timestamp=completed_at))
+        if self._is_activation(event) and (self._keep_all or not self._activations):
+            self._activations.append(replace(event, timestamp=completed_at))
 
     def verdict(self) -> Verdict:
         return Verdict.VIOLATED if self._violated else Verdict.SATISFIED
 
-    def _too_early(self, earlier: Event, event: Event) -> bool:
-        """The event begins before the time window after the earlier one opens"""
+    def _too_late(self, earlier: Event, event: Event) -> bool:
+        """The event begins after the time window after the earlier one closed"""
         time_condition = self.definition.time_condition
         if time_condition is None:
             return False
-        low, _ = time_condition.bounds
-        return event.timestamp - earlier.timestamp < low
+        _, high = time_condition.bounds
+        return event.timestamp - earlier.timestamp > high
 
     def _is_activation(self, event: Event) -> bool:
         d = self.definition

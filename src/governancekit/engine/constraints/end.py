@@ -1,7 +1,10 @@
 """
-MP-DECLARE Existence constraint
+MP-DECLARE End constraint
 
-Satisfied if the activity occurs at least n times (default n = 1).
+Satisfied if the last completed activity is a matching activation.
+
+An ordering constraint: it hears about every completion and is asked on every
+begin.
 """
 
 from collections.abc import Mapping
@@ -13,10 +16,10 @@ from governancekit.engine.events import Event
 from governancekit.engine.mp_declare_model import ConstraintDef
 
 
-class ExistenceInstance:
+class EndInstance:
     def __init__(self, definition: ConstraintDef) -> None:
         self.definition = definition
-        self._count = 0
+        self._ends_with_activation = False
 
     def can_begin(
         self,
@@ -26,12 +29,10 @@ class ExistenceInstance:
         return Decision.ALLOWED
 
     def on_finish(self, event: Event, completed_at: datetime) -> None:
-        if self._is_activation(event):
-            self._count += 1
+        self._ends_with_activation = self._is_activation(event)
 
     def verdict(self) -> Verdict:
-        d = self.definition
-        return Verdict.SATISFIED if self._count >= (d.count or 1) else Verdict.VIOLATED
+        return Verdict.SATISFIED if self._ends_with_activation else Verdict.VIOLATED
 
     def _is_activation(self, event: Event) -> bool:
         d = self.definition

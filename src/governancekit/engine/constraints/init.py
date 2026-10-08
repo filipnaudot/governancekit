@@ -1,7 +1,10 @@
 """
 MP-DECLARE Init constraint
 
-Satisfied if trace starts with the given activity
+Satisfied if the first completed activity is a matching activation.
+
+An ordering constraint: it hears about every completion and is asked on every
+begin.
 """
 
 from collections.abc import Mapping
@@ -14,7 +17,7 @@ from governancekit.engine.mp_declare_model import ConstraintDef
 
 
 class InitInstance:
-    def __init__(self, definition: ConstraintDef):
+    def __init__(self, definition: ConstraintDef) -> None:
         self.definition = definition
         self._decided = False
         self._satisfied = False
@@ -23,15 +26,17 @@ class InitInstance:
         self,
         event: Event,
         running: Mapping[str, Mapping[str, Event]],
-        last_completed: Event | None,
     ) -> Decision:
-        # Until the first completion, only the activation may begin
-        if last_completed is not None or self._is_activation(event):
+        if self._decided or self._is_activation(event):
             return Decision.ALLOWED
-        return Decision.WAIT
+        if any(
+            self._is_activation(a)
+            for a in running.get(self.definition.activation_activity, {}).values()
+        ):
+            return Decision.WAIT
+        return Decision.DENIED
 
     def on_finish(self, event: Event, completed_at: datetime) -> None:
-        # Only the first completion decides the constraint
         if not self._decided:
             self._decided = True
             self._satisfied = self._is_activation(event)

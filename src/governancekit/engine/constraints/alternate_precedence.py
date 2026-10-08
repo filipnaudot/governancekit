@@ -1,7 +1,10 @@
 """
-MP-DECLARE Precedence constraint
+MP-DECLARE Alternate Precedence constraint
 
-Satisfied if every activation is preceded by a matching target.
+Satisfied if every activation is preceded by a matching target that completed
+after the previous activation: each activation uses up all targets before it.
+
+Activations are exclusive while running.
 """
 
 from collections.abc import Mapping
@@ -14,10 +17,11 @@ from governancekit.engine.events import Event
 from governancekit.engine.mp_declare_model import ConstraintDef
 
 
-class PrecedenceInstance:
+class AlternatePrecedenceInstance:
     def __init__(self, definition: ConstraintDef) -> None:
         self.definition = definition
-        self._targets: list[Event] = []
+        # Targets completed since the previous activation
+        self._available: list[Event] = []
         self._violated = False
         self._keep_all = (
             definition.correlation_condition is not None
@@ -30,31 +34,38 @@ class PrecedenceInstance:
         running: Mapping[str, Mapping[str, Event]],
     ) -> Decision:
         d = self.definition
-        if not self._is_activation(event) or any(
-            self._matches(event, t) for t in self._targets
-        ):
+        if not self._is_activation(event):
             return Decision.ALLOWED
-        if any(
+        if any(self._matches(event, t) for t in self._available):
+            decision = Decision.ALLOWED
+        elif any(
             self._correlates(event, t) and self._too_early(t, event)
-            for t in self._targets
-        ):
-            return Decision.WAIT
-        if any(
+            for t in self._available
+        ) or any(
             self._correlates(event, t)
             for t in running.get(d.target_activity, {}).values()
         ):
+            decision = Decision.WAIT
+        else:
+            return Decision.DENIED
+        # Two activations running at once could both complete after the same target.
+        # The running one completing would use up the targets, so DENIED stays DENIED.
+        if any(
+            self._is_activation(a)
+            for a in running.get(d.activation_activity, {}).values()
+        ):
             return Decision.WAIT
-        return Decision.DENIED
+        return decision
 
     def on_finish(self, event: Event, completed_at: datetime) -> None:
-        if self._is_activation(event) and not any(
-            self._matches(event, t) for t in self._targets
-        ):
-            self._violated = True
+        if self._is_activation(event):
+            if not any(self._matches(event, t) for t in self._available):
+                self._violated = True
+            self._available = []
         if event.activity == self.definition.target_activity and (
-            self._keep_all or not self._targets
+            self._keep_all or not self._available
         ):
-            self._targets.append(replace(event, timestamp=completed_at))
+            self._available.append(replace(event, timestamp=completed_at))
 
     def verdict(self) -> Verdict:
         return Verdict.VIOLATED if self._violated else Verdict.SATISFIED
