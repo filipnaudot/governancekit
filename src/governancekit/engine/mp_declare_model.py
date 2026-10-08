@@ -14,7 +14,6 @@ from governancekit.engine.templates import Template
 NEVER_BLOCKING_TEMPLATES = frozenset(
     {
         Template.EXISTENCE,
-        Template.END,
         Template.CHOICE,
         Template.RESPONDED_EXISTENCE,
         Template.CO_EXISTENCE,
@@ -22,13 +21,18 @@ NEVER_BLOCKING_TEMPLATES = frozenset(
     }
 )
 
-# Constrain which activity completes first or next, so any activity can violate them
+# Depend on which activity completes first, next or last, so any activity completing
+# can affect them. They hear about every completion and are asked on every begin.
 ORDERING_TEMPLATES = frozenset(
     {
         Template.INIT,
+        Template.END,
         Template.CHAIN_RESPONSE,
         Template.CHAIN_PRECEDENCE,
         Template.CHAIN_SUCCESSION,
+        Template.NOT_CHAIN_RESPONSE,
+        Template.NOT_CHAIN_PRECEDENCE,
+        Template.NOT_CHAIN_SUCCESSION,
     }
 )
 

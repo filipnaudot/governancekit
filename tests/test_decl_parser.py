@@ -65,6 +65,23 @@ def test_template_names_ignore_spaces_and_hyphens(name, template):
     assert definitions[0].template == template
 
 
+@pytest.mark.parametrize("template", list(Template), ids=lambda t: t.value)
+def test_every_template_parses_by_its_name(template):
+    unary = {
+        Template.EXISTENCE,
+        Template.ABSENCE,
+        Template.EXACTLY,
+        Template.INIT,
+        Template.END,
+    }
+    args = "a" if template in unary else "a, b"
+    definitions = parse_decl_text(
+        f"activity a\nactivity b\n{template.value}[{args}] |||"
+    )
+
+    assert definitions[0].template == template
+
+
 @pytest.mark.parametrize(
     "name",
     [

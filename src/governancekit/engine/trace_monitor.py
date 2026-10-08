@@ -27,7 +27,6 @@ class TraceMonitor:
         self.model = model
         self.instances = [build_instance(d) for d in model.constraints]
         self.running: dict[str, dict[str, Event]] = {}  # activity -> {iid -> event}
-        self.last_completed: Event | None = None
         self._in_flight: dict[str, Event] = {}  # iid -> event
 
     def begin(self, event: Event) -> tuple[Decision, str | None, list[str]]:
@@ -64,7 +63,6 @@ class TraceMonitor:
                 completed_at = datetime.now(UTC)
             for i in self._finish_candidates(event):
                 self.instances[i].on_finish(event, completed_at)
-            self.last_completed = event
         return event
 
     def check(self, event: Event) -> tuple[Decision, list[str]]:
@@ -76,7 +74,7 @@ class TraceMonitor:
         decisions = [
             (
                 self.instances[i].definition.source,
-                self.instances[i].can_begin(event, self.running, self.last_completed),
+                self.instances[i].can_begin(event, self.running),
             )
             for i in self._begin_candidates(event)
         ]

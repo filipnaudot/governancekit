@@ -1,7 +1,9 @@
 """
-MP-DECLARE Existence constraint
+MP-DECLARE Choice constraint
 
-Satisfied if the activity occurs at least n times (default n = 1).
+Satisfied if at least one of the two activities occurs.
+
+The activation condition applies to both activities.
 """
 
 from collections.abc import Mapping
@@ -13,10 +15,10 @@ from governancekit.engine.events import Event
 from governancekit.engine.mp_declare_model import ConstraintDef
 
 
-class ExistenceInstance:
+class ChoiceInstance:
     def __init__(self, definition: ConstraintDef) -> None:
         self.definition = definition
-        self._count = 0
+        self._satisfied = False
 
     def can_begin(
         self,
@@ -26,15 +28,15 @@ class ExistenceInstance:
         return Decision.ALLOWED
 
     def on_finish(self, event: Event, completed_at: datetime) -> None:
-        if self._is_activation(event):
-            self._count += 1
+        d = self.definition
+        if self._is(event, d.activation_activity) or self._is(event, d.target_activity):
+            self._satisfied = True
 
     def verdict(self) -> Verdict:
-        d = self.definition
-        return Verdict.SATISFIED if self._count >= (d.count or 1) else Verdict.VIOLATED
+        return Verdict.SATISFIED if self._satisfied else Verdict.VIOLATED
 
-    def _is_activation(self, event: Event) -> bool:
+    def _is(self, event: Event, activity: str) -> bool:
         d = self.definition
-        return event.activity == d.activation_activity and (
+        return event.activity == activity and (
             d.activation_condition is None or d.activation_condition(event)
         )
