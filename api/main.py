@@ -353,7 +353,7 @@ def create_app(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://localhost:3000"],
         allow_methods=["*"],
-        allow_headers=["*"],   # needed so the browser may send Authorization
+        allow_headers=["*"],  
     )
 
     return app
