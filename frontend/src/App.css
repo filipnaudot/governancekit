@@ -107,3 +107,43 @@ th {
   color: var(--text-h);
   font-weight: 500;
 }
+
+.app > .card + .card {
+  margin-top: 24px;
+}
+
+tr.clickable {
+  cursor: pointer;
+}
+
+tr.clickable:hover,
+tr.clickable[aria-expanded='true'] {
+  background: var(--accent-bg);
+}
+
+tr.clickable:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: -2px;
+}
+
+tr.details dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+tr.details dt {
+  color: var(--text-h);
+  font-weight: 500;
+}
+
+tr.details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+tr.details ul {
+  margin: 0;
+  padding-left: 20px;
+}

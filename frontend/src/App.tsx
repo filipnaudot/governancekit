@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { ApiError, listAgents, login } from './api'
-import type { AgentInfo } from './api'
+import { ApiError, listAgents, listAuditLog, login } from './api'
+import type { AgentInfo, AuditAction, AuditEntry } from './api'
 import './App.css'
 
 const TOKEN_KEY = 'gk-token'
@@ -33,16 +33,15 @@ function App() {
     setToken(newToken)
   }
 
-  // Stable identity, so AgentList does not reload when App re-renders
-  const handleLogout = useCallback(() => {
+  function handleLogout() {
     saveToken(null)
     setToken(null)
-  }, [])
+  }
 
   return (
     <main className="app">
       <header className="app-header">
-        <h1>GovernanceKit</h1>
+        <h1>Governance Kit</h1>
         {token && (
           <button type="button" className="secondary" onClick={handleLogout}>
             Log out
@@ -54,12 +53,14 @@ function App() {
       ) : (
         <LoginForm onLogin={handleLogin} />
       )}
+
+      {token && <AuditLog token={token} onUnauthorized={handleLogout} />}
     </main>
   )
 }
 
 function LoginForm({ onLogin }: { onLogin: (token: string) => void }) {
-  const [id, setId] = useState('admin')
+  const [id, setId] = useState('')
   const [secret, setSecret] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -137,7 +138,7 @@ function AgentList({
   return (
     <section className="card">
       <div className="card-header">
-        <h2>Known agents</h2>
+        <h2>Registered Agents</h2>
         <button type="button" className="secondary" onClick={load}>
           Refresh
         </button>
@@ -169,9 +170,189 @@ function AgentList({
   )
 }
 
+
+function AuditLog({
+  token,
+  onUnauthorized,
+}: {
+  token: string
+  onUnauthorized: () => void
+}) {
+  const [entries, setEntries] = useState<AuditEntry[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  // Index (in the server's list) of the entry whose details are shown
+  const [selected, setSelected] = useState<number | null>(null)
+
+  // State is only set in the promise callbacks, after the request finishes
+  const load = useCallback(
+    () =>
+      listAuditLog(token).then(
+        (result) => {
+          setEntries(result)
+          setError(null)
+        },
+        (e) => {
+          // Expired or invalid token: go back to the login form
+          if (e instanceof ApiError && e.status === 401) onUnauthorized()
+          else setError(errorMessage(e))
+        },
+      ),
+    [token, onUnauthorized],
+  )
+
+  // Load when the component appears
+  useEffect(() => {
+    load()
+  }, [load])
+
+  function toggle(index: number) {
+    setSelected((current) => (current === index ? null : index))
+  }
+
+  return (
+    <section className="card">
+      <div className="card-header">
+        <h2>Agent Audit Log</h2>
+        <button type="button" className="secondary" onClick={load}>
+          Refresh
+        </button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {entries === null && !error && <p>Loading…</p>}
+      {entries?.length === 0 && <p>Nothing recorded yet.</p>}
+      {entries && entries.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>Received</th>
+              <th>Action</th>
+              <th>Activity</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {/* Newest first. The log is append-only, so the index is a stable key. */}
+            {entries
+              .map((entry, index) => ({ entry, index }))
+              .reverse()
+              .map(({ entry, index }) => (
+                <AuditRow
+                  key={index}
+                  entry={entry}
+                  open={selected === index}
+                  onToggle={() => toggle(index)}
+                />
+              ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  )
+}
+
+function AuditRow({
+  entry,
+  open,
+  onToggle,
+}: {
+  entry: AuditEntry
+  open: boolean
+  onToggle: () => void
+}) {
+  return (
+    <>
+      <tr
+        className="clickable"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onToggle()
+          }
+        }}
+      >
+        <td>{formatTime(entry.received_at)}</td>
+        <td>{ACTION_LABELS[entry.action]}</td>
+        <td>{entry.activity ?? '—'}</td>
+        <td>{auditResult(entry)}</td>
+      </tr>
+      {open && (
+        <tr className="details">
+          <td colSpan={4}>
+            <dl>
+              <dt>Agent</dt>
+              <dd>
+                <code>{entry.agent_id}</code>
+              </dd>
+              <dt>Trace</dt>
+              <dd>
+                <code>{entry.trace_id}</code>
+              </dd>
+              <dt>Received at</dt>
+              <dd>{entry.received_at}</dd>
+              {entry.event_timestamp && (
+                <>
+                  <dt>Event timestamp</dt>
+                  <dd>{entry.event_timestamp}</dd>
+                </>
+              )}
+              {entry.allowed !== null && (
+                <>
+                  <dt>Allowed</dt>
+                  <dd>{entry.allowed ? 'Yes' : 'No'}</dd>
+                </>
+              )}
+              {(entry.action === 'check' || entry.action === 'end_trace') && (
+                <>
+                  <dt>Violations</dt>
+                  <dd>
+                    {entry.violations.length === 0 ? (
+                      'None'
+                    ) : (
+                      <ul>
+                        {entry.violations.map((v) => (
+                          <li key={v}>{v}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </dd>
+                </>
+              )}
+            </dl>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+const ACTION_LABELS: Record<AuditAction, string> = {
+  start_trace: 'Start trace',
+  end_trace: 'End trace',
+  check: 'Check',
+  commit: 'Commit',
+}
+
+/** One-word summary for the table; the details row has the rest. */
+function auditResult(entry: AuditEntry): string {
+  if (entry.action === 'check') return entry.allowed ? 'Allowed' : 'Blocked'
+  if (entry.action === 'end_trace') {
+    return entry.violations.length === 0
+      ? 'Conformant'
+      : `${entry.violations.length} violation(s)`
+  }
+  return '—'
+}
+
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleString()
+}
+
 function errorMessage(e: unknown): string {
   if (e instanceof ApiError) {
-    if (e.status === 403) return 'Only admins can see the agents.'
+    if (e.status === 403) return 'Requires an admin login.'
     return e.message
   }
   // fetch itself failed: server down, or CORS blocked the request

@@ -8,6 +8,21 @@ export type AgentInfo = {
   agent_name: string
 }
 
+/** Mirrors Action in api/audit.py. */
+export type AuditAction = 'start_trace' | 'end_trace' | 'check' | 'commit'
+
+/** Mirrors AuditEntry in api/audit.py. Datetimes arrive as ISO 8601 strings. */
+export type AuditEntry = {
+  received_at: string
+  agent_id: string
+  trace_id: string
+  action: AuditAction
+  activity: string | null // null for start/end trace
+  event_timestamp: string | null // null for start/end trace
+  allowed: boolean | null // only set for check
+  violations: string[] // for check and end trace
+}
+
 /** An error response from the API, with its HTTP status. */
 export class ApiError extends Error {
   status: number
@@ -60,4 +75,11 @@ export async function listAgents(token: string): Promise<AgentInfo[]> {
   const res = await apiFetch('/agents', token)
   const body: { agents: AgentInfo[] } = await res.json()
   return body.agents
+}
+
+/** The whole audit log, oldest entry first. */
+export async function listAuditLog(token: string): Promise<AuditEntry[]> {
+  const res = await apiFetch('/audit', token)
+  const body: { auditLog: AuditEntry[] } = await res.json()
+  return body.auditLog
 }
