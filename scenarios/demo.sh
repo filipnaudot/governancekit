@@ -46,7 +46,6 @@ check issue_refund
 step "Agent gets the refund approved, issues it and closes the ticket"
 act approve_refund
 act issue_refund
-commit close_ticket
 
 step "Agent ends the trace"
 end_trace
