@@ -1,1 +1,8 @@
-activity verify_identity\nactivityview_account\nactivity approve_refund\nactivity issue_refund\nactivity close_ticket\nPrecedence[verify_identity, view_account] |||\nPrecedence[approve_refund, issue_refund] |||\nExistence[close_ticket, 1] |||\n
+activity verify_identity
+activity view_account
+activity approve_refund
+activity issue_refund
+activity close_ticket
+Precedence[verify_identity, view_account] |||
+Precedence[approve_refund, issue_refund] |||
+Existence[close_ticket, 1] |||

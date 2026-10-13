@@ -8,6 +8,12 @@ export type AgentInfo = {
   agent_name: string
 }
 
+/** Mirrors ModelInfo in src/governancekit/server/main.py. */
+export type ModelInfo = {
+  model_id: string
+  constraint_count: number
+}
+
 /** Mirrors Action in src/governancekit/server/audit.py. */
 export type AuditAction = 'start_trace' | 'end_trace' | 'check' | 'begin' | 'finish'
 
@@ -90,4 +96,17 @@ export async function listAuditLog(token: string): Promise<AuditEntry[]> {
   const res = await apiFetch('/audit', token)
   const body: { auditLog: AuditEntry[] } = await res.json()
   return body.auditLog
+}
+
+export async function listModels(token: string): Promise<ModelInfo[]> {
+  const res = await apiFetch('/models', token)
+  const body: { models: ModelInfo[] } = await res.json()
+  return body.models
+}
+
+/** A model's MP-Declare text, as it was added. */
+export async function getModelText(token: string, modelId: string): Promise<string> {
+  const res = await apiFetch(`/models/${encodeURIComponent(modelId)}`, token)
+  const body: { decl: string } = await res.json()
+  return body.decl
 }

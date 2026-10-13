@@ -140,6 +140,19 @@ class AuditResponse(BaseModel):
     auditLog: list[AuditEntry]
 
 
+class ModelInfo(BaseModel):
+    model_id: str
+    constraint_count: int
+
+
+class ModelListResponse(BaseModel):
+    models: list[ModelInfo]
+
+
+class ModelResponse(BaseModel):
+    model_id: str
+    decl: str = Field(description="The model's .decl text, as it was added")
+
 # ---------- App ----------
 
 
@@ -158,6 +171,7 @@ def create_app(
     registry = MonitorRegistry()
     auth = Authenticator(jwt_secret=jwt_secret, admin_secret=admin_secret)
     trace_agents: dict[str, str] = {}  # trace ID -> ID of the agent working on it
+    model_texts: dict[str, str] = {}  # model ID -> .decl text it was added with
 
     # Server logs trace starts/ends, and checked, begun and finished activities
     audit = AuditLog()
@@ -255,7 +269,32 @@ def create_app(
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, f"Unable to add model: {e}"
             ) from e
+        """TODO Perhaps implement something of our own that can be used with the regristry parsed model instead of the delcare text."""
+        model_texts[model_id] = body.decl
         return AddModelResponse(model_id=model_id)
+
+    @app.get("/models", tags=["management"], dependencies=[Depends(require_admin)])
+    def list_models() -> ModelListResponse:
+        """Admin endpoint. Returns the known models."""
+        return ModelListResponse(
+            models=[
+                ModelInfo(model_id=model_id, constraint_count=len(model.constraints))
+                for model_id, model in registry.models.items()
+            ]
+        )
+
+    @app.get(
+        "/models/{model_id}",
+        tags=["management"],
+        dependencies=[Depends(require_admin)],
+    )
+    def get_model(model_id: str) -> ModelResponse:
+        """Admin endpoint. Returns a model's .decl text."""
+        if model_id not in model_texts:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, f"Unknown model: {model_id!r}"
+            )
+        return ModelResponse(model_id=model_id, decl=model_texts[model_id])
 
     # --- Runtime ---
     """

@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { ApiError, listAgents, listAuditLog, login } from './api'
+import {
+  ApiError,
+  getModelText,
+  listAgents,
+  listAuditLog,
+  listModels,
+  login,
+} from './api'
 import type {
   ActivityStatus,
   AgentInfo,
   AuditAction,
   AuditEntry,
   Decision,
+  ModelInfo,
 } from './api'
 import './App.css'
 
@@ -61,6 +69,9 @@ function App() {
       )}
 
       {token && <AuditLog token={token} onUnauthorized={handleLogout} />}
+
+      {token && <ModelList token={token} onUnauthorized={handleLogout} />}
+
     </main>
   )
 }
@@ -341,6 +352,144 @@ function AuditRow({
                 </>
               )}
             </dl>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+function ModelList({
+  token,
+  onUnauthorized,
+}: {
+  token: string
+  onUnauthorized: () => void
+}) {
+  const [models, setModels] = useState<ModelInfo[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  // ID of the model whose text is shown
+  const [selected, setSelected] = useState<string | null>(null)
+
+  // State is only set in the promise callbacks, after the request finishes
+  const load = useCallback(
+    () =>
+      listModels(token).then(
+        (result) => {
+          setModels(result)
+          setError(null)
+        },
+        (e) => {
+          // Expired or invalid token: go back to the login form
+          if (e instanceof ApiError && e.status === 401) onUnauthorized()
+          else setError(errorMessage(e))
+        },
+      ),
+    [token, onUnauthorized],
+  )
+
+  // Load when the component appears
+  useEffect(() => {
+    load()
+  }, [load])
+
+  function toggle(modelId: string) {
+    setSelected((current) => (current === modelId ? null : modelId))
+  }
+
+  return (
+    <section className="card">
+      <div className="card-header">
+        <h2>Declare Models</h2>
+        <button type="button" className="secondary" onClick={load}>
+          Refresh
+        </button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {models === null && !error && <p>Loading…</p>}
+      {models?.length === 0 && <p>No models added yet.</p>}
+      {models && models.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Constraints</th>
+            </tr>
+          </thead>
+          <tbody>
+            {models.map((model) => (
+              <ModelRow
+                key={model.model_id}
+                token={token}
+                model={model}
+                open={selected === model.model_id}
+                onToggle={() => toggle(model.model_id)}
+                onUnauthorized={onUnauthorized}
+              />
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  )
+}
+
+function ModelRow({
+  token,
+  model,
+  open,
+  onToggle,
+  onUnauthorized,
+}: {
+  token: string
+  model: ModelInfo
+  open: boolean
+  onToggle: () => void
+  onUnauthorized: () => void
+}) {
+  // Fetched the first time the row is opened; a model's text never changes
+  const [text, setText] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open || text !== null) return
+    getModelText(token, model.model_id).then(
+      (result) => {
+        setText(result)
+        setError(null)
+      },
+      (e) => {
+        if (e instanceof ApiError && e.status === 401) onUnauthorized()
+        else setError(errorMessage(e))
+      },
+    )
+  }, [open, text, token, model.model_id, onUnauthorized])
+
+  return (
+    <>
+      <tr
+        className="clickable"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onToggle()
+          }
+        }}
+      >
+        <td>
+          <code>{model.model_id}</code>
+        </td>
+        <td>{model.constraint_count}</td>
+      </tr>
+      {open && (
+        <tr className="details">
+          <td colSpan={2}>
+            {error && <p className="error">{error}</p>}
+            {text === null && !error && <p>Loading…</p>}
+            {text !== null && <pre className="decl">{text.trim()}</pre>}
           </td>
         </tr>
       )}
