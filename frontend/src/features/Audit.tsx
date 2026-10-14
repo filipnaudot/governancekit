@@ -1,7 +1,8 @@
-// Audit log of what agents have checked, begun and finished.
+// Audit entries: what agents have started, ended, checked, begun and finished.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ApiError, apiFetch, errorMessage } from '../api'
+import { formatTime } from '../format'
 import { useSession } from './Auth'
 
 /** Mirrors Action in src/governancekit/server/audit.py. */
@@ -27,84 +28,87 @@ type AuditEntry = {
   violations: string[] // for check, begin and end trace
 }
 
-/** The whole audit log, oldest entry first. */
-async function listAuditLog(token: string): Promise<AuditEntry[]> {
-  const res = await apiFetch('/audit', token)
+/** A trace's audit log, oldest entry first. */
+async function getTraceAudit(token: string, traceId: string): Promise<AuditEntry[]> {
+  const res = await apiFetch(`/traces/${encodeURIComponent(traceId)}/audit`, token)
   const body: { auditLog: AuditEntry[] } = await res.json()
   return body.auditLog
 }
 
-export function AuditLog() {
+/**
+ * One trace's audit log. Fetched when shown, and again whenever loadCount
+ * changes, since a running trace's log keeps growing.
+ */
+export function TraceAuditLog({
+  traceId,
+  loadCount,
+}: {
+  traceId: string
+  loadCount: number
+}) {
   const { token, logOut } = useSession()
   const [entries, setEntries] = useState<AuditEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // Index (in the server's list) of the entry whose details are shown
-  const [selected, setSelected] = useState<number | null>(null)
 
-  // State is only set in the promise callbacks, after the request finishes
-  const load = useCallback(
-    () =>
-      listAuditLog(token).then(
-        (result) => {
-          setEntries(result)
-          setError(null)
-        },
-        (e) => {
-          // Expired or invalid token: go back to the login form
-          if (e instanceof ApiError && e.status === 401) logOut()
-          else setError(errorMessage(e))
-        },
-      ),
-    [token, logOut],
-  )
-
-  // Load when the component appears
   useEffect(() => {
-    load()
-  }, [load])
+    getTraceAudit(token, traceId).then(
+      (result) => {
+        setEntries(result)
+        setError(null)
+      },
+      (e) => {
+        // Expired or invalid token: go back to the login form
+        if (e instanceof ApiError && e.status === 401) logOut()
+        else setError(errorMessage(e))
+      },
+    )
+  }, [loadCount, token, traceId, logOut])
+
+  return (
+    <>
+      <h3>Audit log</h3>
+      {error && <p className="error">{error}</p>}
+      {entries === null && !error && <p>Loading…</p>}
+      {entries && <AuditTable entries={entries} />}
+    </>
+  )
+}
+
+/** A table of audit entries, newest first. Click an entry to see its details. */
+function AuditTable({ entries }: { entries: AuditEntry[] }) {
+  // Index (in entries) of the entry whose details are shown
+  const [selected, setSelected] = useState<number | null>(null)
 
   function toggle(index: number) {
     setSelected((current) => (current === index ? null : index))
   }
 
+  if (entries.length === 0) return <p>Nothing recorded yet.</p>
   return (
-    <section className="card">
-      <div className="card-header">
-        <h2>Agent Audit Log</h2>
-        <button type="button" className="secondary" onClick={load}>
-          Refresh
-        </button>
-      </div>
-      {error && <p className="error">{error}</p>}
-      {entries === null && !error && <p>Loading…</p>}
-      {entries?.length === 0 && <p>Nothing recorded yet.</p>}
-      {entries && entries.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Received</th>
-              <th>Action</th>
-              <th>Activity</th>
-              <th>Result</th>
-            </tr>
-          </thead>
-          <tbody>
-            {/* Newest first. The log is append-only, so the index is a stable key. */}
-            {entries
-              .map((entry, index) => ({ entry, index }))
-              .reverse()
-              .map(({ entry, index }) => (
-                <AuditRow
-                  key={index}
-                  entry={entry}
-                  open={selected === index}
-                  onToggle={() => toggle(index)}
-                />
-              ))}
-          </tbody>
-        </table>
-      )}
-    </section>
+    <table>
+      <thead>
+        <tr>
+          <th>Received</th>
+          <th>Action</th>
+          <th>Activity</th>
+          <th>Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        {/* Newest first. The log is append-only, so the index is a stable key. */}
+        {entries
+          .map((entry, index) => ({ entry, index }))
+          .reverse()
+          .map(({ entry, index }) => (
+            <AuditRow
+              key={index}
+              entry={entry}
+              open={selected === index}
+              onToggle={() => toggle(index)}
+            />
+          ))}
+      </tbody>
+    </table>
   )
 }
 
@@ -230,8 +234,4 @@ function auditResult(entry: AuditEntry): string {
       : `${entry.violations.length} violation(s)`
   }
   return '—'
-}
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString()
 }

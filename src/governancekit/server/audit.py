@@ -77,6 +77,7 @@ class TraceRecord:
     agent_ids: set[str]  # The agents allowed to work on the trace
     started_at: datetime
     ended_at: datetime | None = None  # None while the trace is running
+    violations: list[str] | None = None  # The final verdict; None while running
     entries: list[AuditEntry] = field(default_factory=list)  # In recorded order
 
 
@@ -102,8 +103,11 @@ class AuditLog:
             started_at=datetime.now(UTC),
         )
 
-    def end_trace(self, trace_id: str) -> None:
-        self.traces[trace_id].ended_at = datetime.now(UTC)
+    def end_trace(self, trace_id: str, violations: list[str]) -> None:
+        """Mark a trace as ended, with the constraints it violated."""
+        record = self.traces[trace_id]
+        record.ended_at = datetime.now(UTC)
+        record.violations = violations
 
     def add_audit(self, audit: AuditEntry) -> None:
         """

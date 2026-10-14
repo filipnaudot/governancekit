@@ -78,6 +78,20 @@ class EndTraceResponse(BaseModel):
     violations: list[str]
 
 
+class TraceSummary(BaseModel):
+    trace_id: str
+    model_id: str
+    agent_ids: list[str]
+    started_at: datetime
+    ended_at: datetime | None = Field(description="None while the trace is running")
+    violations: list[str] | None = Field(description="None while the trace is running")
+    entry_count: int = Field(description="Number of entries in the trace's audit log")
+
+
+class TraceListResponse(BaseModel):
+    traces: list[TraceSummary]
+
+
 class AddAgentRequest(BaseModel):
     agent_id: str
 
@@ -182,7 +196,7 @@ def end_trace(
         )
     )
     # Update the state to end trace.
-    state.audit.end_trace(trace_id)
+    state.audit.end_trace(trace_id, violations)
 
     return EndTraceResponse(
         trace_id=trace_id,
@@ -347,3 +361,34 @@ def add_agent(
         )
     record.agent_ids.add(body.agent_id)
     return TraceAgentsResponse(trace_id=trace_id, agent_ids=sorted(record.agent_ids))
+
+
+@router.get("/traces", tags=["management"], dependencies=[Depends(require_admin)])
+def list_traces(
+    state: Annotated[ServerState, Depends(get_state)],
+    ended: bool | None = None,
+) -> TraceListResponse:
+    """Admin endpoint. All traces, newest first.
+
+    ended=false gives only the running traces, ended=true only the ended ones.
+    """
+    records = [
+        record
+        for record in state.audit.traces.values()
+        if ended is None or (record.ended_at is not None) == ended
+    ]
+    records.sort(key=lambda record: record.started_at, reverse=True)
+    return TraceListResponse(
+        traces=[
+            TraceSummary(
+                trace_id=record.trace_id,
+                model_id=record.model_id,
+                agent_ids=sorted(record.agent_ids),
+                started_at=record.started_at,
+                ended_at=record.ended_at,
+                violations=record.violations,
+                entry_count=len(record.entries),
+            )
+            for record in records
+        ]
+    )

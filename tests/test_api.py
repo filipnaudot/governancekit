@@ -568,3 +568,49 @@ def test_adding_agents_requires_admin(client, agent, agent_id):
     response = agent.post(f"/traces/{trace_id}/agents", json={"agent_id": agent_id})
 
     assert response.status_code == 403
+
+
+def test_list_traces_filters_running_and_ended(client, agent, agent_id):
+    model_id = _add_model(client, EXISTENCE_DECL)
+    running_id = _start_trace(agent, model_id)
+    ended_id = _start_trace(agent, model_id)
+    agent.post(f"/traces/{ended_id}/end")
+
+    all_traces = client.get("/traces").json()["traces"]
+    running = client.get("/traces", params={"ended": False}).json()["traces"]
+    ended = client.get("/traces", params={"ended": True}).json()["traces"]
+
+    assert [t["trace_id"] for t in all_traces] == [ended_id, running_id]
+    assert [t["trace_id"] for t in running] == [running_id]
+    assert [t["trace_id"] for t in ended] == [ended_id]
+    assert running[0]["ended_at"] is None and running[0]["violations"] is None
+    assert ended[0]["violations"] == ["Existence[login, 1] |||"]
+    assert ended[0]["agent_ids"] == [agent_id]
+    assert ended[0]["entry_count"] == 2  # start and end
+
+
+def test_listing_traces_requires_admin(agent):
+    assert agent.get("/traces").status_code == 403
+
+
+def test_list_monitors_shows_running_traces_only(client, agent, agent_id):
+    model_id = _add_model(client, EXISTENCE_DECL)
+    running_id = _start_trace(agent, model_id)
+    ended_id = _start_trace(agent, model_id)
+    agent.post(f"/traces/{ended_id}/end")
+    instance_id = _begin(agent, running_id, "login")["instance_id"]
+
+    monitors = client.get("/monitors").json()["monitors"]
+
+    assert [m["trace_id"] for m in monitors] == [running_id]
+    monitor = monitors[0]
+    assert (monitor["model_id"], monitor["agent_ids"]) == (model_id, [agent_id])
+    assert [(r["instance_id"], r["activity"]) for r in monitor["running"]] == [
+        (instance_id, "login")
+    ]
+    # login has begun but not completed, so Existence is not satisfied yet
+    assert monitor["violations"] == ["Existence[login, 1] |||"]
+
+
+def test_listing_monitors_requires_admin(agent):
+    assert agent.get("/monitors").status_code == 403
