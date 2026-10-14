@@ -2,24 +2,26 @@
 Authentication for the GovernanceKit web server.
 
 Admins manage models, traces and agents. Agents can only check, begin and
-finish activities on traces assigned to them. Both log in at /token with an ID and a
-secret and send the returned JWT as a bearer token.
+finish activities on the traces they have been added to. Both log in at
+/token with an ID and a secret and send the returned JWT as a bearer token.
 """
 
 import secrets
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pwdlib import PasswordHash
 from pydantic import BaseModel
 
 from governancekit.server.state import ServerState, get_state
+
+# Only imported for type hints, since agents imports require_admin from here
+if TYPE_CHECKING:
+    from governancekit.server.agents import AgentRegistry
 
 ADMIN_ID = "admin"
 ALGORITHM = "HS256"
@@ -43,46 +45,17 @@ class Principal:
     role: Role
 
 
-@dataclass(frozen=True)
-class Agent:
-    """A registered agent as stored by the server. Never sent to clients."""
-
-    id: str
-    name: str
-    secret_hash: str
-
-
 class Authenticator:
-    """Issues and verifies JWTs, and keeps the known agents in memory.
+    """Checks credentials, and issues and verifies JWTs.
 
-    Attributes:
-        agents: Registered agents, keyed by agent ID.
+    The admin's secret is kept here; the agents' secrets are checked against
+    the agent registry.
     """
 
-    agents: dict[str, Agent]
-
-    def __init__(self, jwt_secret: str, admin_secret: str):
+    def __init__(self, jwt_secret: str, admin_secret: str, agents: "AgentRegistry"):
         self._jwt_secret = jwt_secret
         self._admin_secret = admin_secret
-        self._hasher = PasswordHash.recommended()
-        self.agents = {}
-
-    def register_agent(self, name: str) -> tuple[Agent, str]:
-        """Register a new agent.
-
-        Args:
-            name: Human-readable name of the agent. Does not need to be unique.
-
-        Returns:
-            A tuple (agent, secret). Only a hash of the secret is kept,
-            so it cannot be shown again.
-        """
-        secret = secrets.token_urlsafe(32)
-        agent = Agent(
-            id=str(uuid.uuid4()), name=name, secret_hash=self._hasher.hash(secret)
-        )
-        self.agents[agent.id] = agent
-        return agent, secret
+        self._agents = agents
 
     def authenticate(self, client_id: str, secret: str) -> Principal | None:
         """Return the principal for valid credentials, otherwise None."""
@@ -90,8 +63,7 @@ class Authenticator:
             if secrets.compare_digest(secret.encode(), self._admin_secret.encode()):
                 return Principal(id=ADMIN_ID, role=Role.ADMIN)
             return None
-        agent = self.agents.get(client_id)
-        if agent is not None and self._hasher.verify(secret, agent.secret_hash):
+        if self._agents.verify_secret(client_id, secret):
             return Principal(id=client_id, role=Role.AGENT)
         return None
 

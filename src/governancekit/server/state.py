@@ -11,9 +11,10 @@ from typing import TYPE_CHECKING
 
 from fastapi import Request
 
-# Only imported for type hints, since auth and audit import get_state from here
+# Only imported for type hints, since the routers import get_state from here
 if TYPE_CHECKING:
     from governancekit.engine.monitor_registry import MonitorRegistry
+    from governancekit.server.agents import AgentRegistry
     from governancekit.server.audit import AuditLog
     from governancekit.server.auth import Authenticator
 
@@ -21,11 +22,11 @@ if TYPE_CHECKING:
 @dataclass
 class ServerState:
     auth: Authenticator
+    agents: AgentRegistry
+    # The engine's monitors of running traces
     registry: MonitorRegistry
-    # Server logs trace starts/ends, and checked, begun and finished activities
+    # Records of all traces, running or ended: their agents and audit entries
     audit: AuditLog
-    # trace ID -> ID of the agent working on it
-    trace_agents: dict[str, str] = field(default_factory=dict)
     # model ID -> .decl text it was added with
     model_texts: dict[str, str] = field(default_factory=dict)
 

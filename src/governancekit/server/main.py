@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from governancekit.engine.monitor_registry import MonitorRegistry
 from governancekit.server import agents, audit, auth, models, traces
+from governancekit.server.agents import AgentRegistry
 from governancekit.server.audit import AuditLog
 from governancekit.server.auth import Authenticator
 from governancekit.server.state import ServerState
@@ -41,8 +42,12 @@ def create_app(
         logger.warning("GK_ADMIN_SECRET is not set. Admin secret: %s", admin_secret)
 
     # In-memory state: lost when the server restarts
+    agent_registry = AgentRegistry()
     app.state.gk = ServerState(
-        auth=Authenticator(jwt_secret=jwt_secret, admin_secret=admin_secret),
+        auth=Authenticator(
+            jwt_secret=jwt_secret, admin_secret=admin_secret, agents=agent_registry
+        ),
+        agents=agent_registry,
         registry=MonitorRegistry(),
         audit=AuditLog(),
     )
