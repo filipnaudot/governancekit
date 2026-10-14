@@ -70,7 +70,7 @@ export function MonitorList() {
   return (
     <section className="card">
       <div className="card-header">
-        <h2>Trace monitors</h2>
+        <h2>Trace Monitors</h2>
         <button type="button" className="secondary" onClick={load}>
           Refresh
         </button>

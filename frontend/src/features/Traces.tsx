@@ -60,7 +60,7 @@ export function EndedTraceList() {
   return (
     <section className="card">
       <div className="card-header">
-        <h2>Ended traces</h2>
+        <h2>Ended Traces</h2>
         <button type="button" className="secondary" onClick={load}>
           Refresh
         </button>
