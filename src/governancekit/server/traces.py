@@ -1,0 +1,307 @@
+"""
+Runtime endpoints for the GovernanceKit web server.
+
+Agents start and end traces, and check, begin and finish activities on them.
+Several activities may run at the same time on one trace. Every request is
+recorded in the audit log.
+"""
+
+import uuid
+from datetime import UTC, datetime
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import AwareDatetime, BaseModel, Field
+
+from governancekit.engine.decision import Decision
+from governancekit.engine.events import Event
+from governancekit.server.audit import Action, ActivityStatus, AuditEntry
+from governancekit.server.auth import Principal, require_agent
+from governancekit.server.state import ServerState, get_state
+
+router = APIRouter(tags=["runtime"])
+
+# ---------- Request / response schemas ----------
+
+
+class StartTraceRequest(BaseModel):
+    model_id: str
+
+
+class TraceOut(BaseModel):
+    trace_id: str
+    model_id: str
+    agent_id: str
+
+
+class EventRequest(BaseModel):
+    activity: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    timestamp: AwareDatetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Defaults to the server's current time",
+    )
+
+
+class CheckResponse(BaseModel):
+    decision: Decision
+    blocking: list[str] = Field(description="Constraints that don't allow it")
+
+
+class BeginResponse(BaseModel):
+    decision: Decision
+    instance_id: str | None = Field(
+        description="Only set if allowed; needed to finish the activity"
+    )
+    blocking: list[str] = Field(description="Constraints that don't allow it")
+
+
+class FinishRequest(BaseModel):
+    status: ActivityStatus
+
+
+class RunningActivity(BaseModel):
+    instance_id: str
+    activity: str
+    payload: dict[str, Any]
+    timestamp: datetime = Field(description="When the activity began")
+
+
+class RunningActivitiesResponse(BaseModel):
+    activities: list[RunningActivity]
+
+
+class EndTraceResponse(BaseModel):
+    trace_id: str
+    conformant: bool
+    violations: list[str]
+
+
+# ---------- Helpers ----------
+
+
+def check_trace_owner(state: ServerState, trace_id: str, agent: Principal) -> None:
+    # Another agent's trace is reported as missing, so its ID is not revealed
+    if state.trace_agents.get(trace_id) != agent.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {trace_id!r}")
+
+
+# ---------- Endpoints ----------
+
+"""
+TODO For Start trace the server should allocate memory for a log object which are going to remember what agents has tried to check and commit to the server.
+"""
+
+
+@router.post("/traces", status_code=status.HTTP_201_CREATED)
+def start_trace(
+    body: StartTraceRequest,
+    agent: Annotated[Principal, Depends(require_agent)],
+    state: Annotated[ServerState, Depends(get_state)],
+) -> TraceOut:
+    """Start a trace on a model. The calling agent becomes its owner."""
+    trace_id = str(uuid.uuid4())
+    try:
+        state.registry.start_monitor(model_id=body.model_id, trace_id=trace_id)
+    except KeyError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Unknown model: {e}") from e
+    state.trace_agents[trace_id] = agent.id
+
+    # Log start trace as an action in audit log.
+    state.audit.add_audit(
+        AuditEntry(
+            received_at=datetime.now(UTC),
+            agent_id=agent.id,
+            trace_id=trace_id,
+            action=Action.START_TRACE,
+        )
+    )
+    return TraceOut(trace_id=trace_id, model_id=body.model_id, agent_id=agent.id)
+
+
+@router.post("/traces/{trace_id}/end")
+def end_trace(
+    trace_id: str,
+    agent: Annotated[Principal, Depends(require_agent)],
+    state: Annotated[ServerState, Depends(get_state)],
+    abort_running: bool = False,
+) -> EndTraceResponse:
+    """End one of the calling agent's traces and return the final verdict.
+
+    If activities are still running, the request is rejected with 409,
+    unless abort_running is true; then they are aborted first.
+    """
+    check_trace_owner(state, trace_id, agent)
+    try:
+        violations = state.registry.violations(trace_id=trace_id)
+        aborted = state.registry.end_monitor(
+            trace_id=trace_id, abort_running=abort_running
+        )
+    except KeyError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {e}") from e
+    except ValueError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    state.trace_agents.pop(trace_id, None)
+
+    for instance_id, event in aborted.items():
+        state.audit.add_audit(
+            AuditEntry(
+                received_at=datetime.now(UTC),
+                agent_id=agent.id,
+                trace_id=trace_id,
+                action=Action.FINISH,
+                activity=event.activity,
+                event_timestamp=event.timestamp,
+                instance_id=instance_id,
+                status=ActivityStatus.ABORTED,
+            )
+        )
+
+    state.audit.add_audit(
+        AuditEntry(
+            received_at=datetime.now(UTC),
+            agent_id=agent.id,
+            trace_id=trace_id,
+            action=Action.END_TRACE,
+            violations=violations,
+        )
+    )
+    return EndTraceResponse(
+        trace_id=trace_id,
+        conformant=not violations,
+        violations=violations,
+    )
+
+
+@router.post("/traces/{trace_id}/check")
+def check(
+    trace_id: str,
+    body: EventRequest,
+    agent: Annotated[Principal, Depends(require_agent)],
+    state: Annotated[ServerState, Depends(get_state)],
+) -> CheckResponse:
+    """Ask whether an activity may begin now, without reserving it.
+
+    The answer can be outdated by the time the agent acts; begin the
+    activity before performing it.
+    """
+    check_trace_owner(state, trace_id, agent)
+    event = Event(activity=body.activity, timestamp=body.timestamp, payload=body.payload)
+    try:
+        decision, blocking = state.registry.check_event(trace_id=trace_id, event=event)
+    except KeyError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {e}") from e
+
+    state.audit.add_audit(
+        AuditEntry(
+            received_at=datetime.now(UTC),
+            agent_id=agent.id,
+            trace_id=trace_id,
+            action=Action.CHECK,
+            activity=body.activity,
+            event_timestamp=body.timestamp,
+            decision=decision,
+            violations=blocking,
+        )
+    )
+    return CheckResponse(decision=decision, blocking=blocking)
+
+
+@router.post("/traces/{trace_id}/activities")
+def begin(
+    trace_id: str,
+    body: EventRequest,
+    agent: Annotated[Principal, Depends(require_agent)],
+    state: Annotated[ServerState, Depends(get_state)],
+) -> BeginResponse:
+    """Ask to begin an activity, and reserve it if allowed.
+
+    allowed: perform it, then finish it with the returned instance_id.
+    wait: not now, ask again later. denied: don't perform it.
+    """
+    check_trace_owner(state, trace_id, agent)
+    event = Event(activity=body.activity, timestamp=body.timestamp, payload=body.payload)
+    try:
+        decision, instance_id, blocking = state.registry.begin_event(
+            trace_id=trace_id, event=event
+        )
+    except KeyError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {e}") from e
+
+    state.audit.add_audit(
+        AuditEntry(
+            received_at=datetime.now(UTC),
+            agent_id=agent.id,
+            trace_id=trace_id,
+            action=Action.BEGIN,
+            activity=body.activity,
+            event_timestamp=body.timestamp,
+            decision=decision,
+            instance_id=instance_id,
+            violations=blocking,
+        )
+    )
+    return BeginResponse(decision=decision, instance_id=instance_id, blocking=blocking)
+
+
+@router.post(
+    "/traces/{trace_id}/activities/{instance_id}/finish",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def finish(
+    trace_id: str,
+    instance_id: str,
+    body: FinishRequest,
+    agent: Annotated[Principal, Depends(require_agent)],
+    state: Annotated[ServerState, Depends(get_state)],
+) -> None:
+    """Report how a running activity ended. Only completed ones count."""
+    check_trace_owner(state, trace_id, agent)
+    try:
+        event = state.registry.finish_event(
+            trace_id=trace_id,
+            instance_id=instance_id,
+            completed=body.status is ActivityStatus.COMPLETED,
+        )
+    except KeyError as e:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"Trace or activity not found: {e}"
+        ) from e
+
+    state.audit.add_audit(
+        AuditEntry(
+            received_at=datetime.now(UTC),
+            agent_id=agent.id,
+            trace_id=trace_id,
+            action=Action.FINISH,
+            activity=event.activity,
+            event_timestamp=event.timestamp,
+            instance_id=instance_id,
+            status=body.status,
+        )
+    )
+
+
+@router.get("/traces/{trace_id}/activities")
+def running_activities(
+    trace_id: str,
+    agent: Annotated[Principal, Depends(require_agent)],
+    state: Annotated[ServerState, Depends(get_state)],
+) -> RunningActivitiesResponse:
+    """Activities that have begun but not finished on this trace."""
+    check_trace_owner(state, trace_id, agent)
+    try:
+        running = state.registry.unfinished(trace_id=trace_id)
+    except KeyError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {e}") from e
+    return RunningActivitiesResponse(
+        activities=[
+            RunningActivity(
+                instance_id=instance_id,
+                activity=event.activity,
+                payload=event.payload,
+                timestamp=event.timestamp,
+            )
+            for instance_id, event in running.items()
+        ]
+    )

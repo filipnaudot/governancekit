@@ -8,8 +8,16 @@ checks, begins or finishes, so it can later be reviewed who did what and when.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from governancekit.engine.decision import Decision
+from governancekit.server.auth import require_admin
+from governancekit.server.state import ServerState, get_state
+
+router = APIRouter(tags=["management"], dependencies=[Depends(require_admin)])
 
 
 class Action(StrEnum):
@@ -66,3 +74,21 @@ class AuditLog:
 
     def add_audit(self, audit: AuditEntry) -> None:
         self.entries.append(audit)
+
+
+# ---------- Request / response schemas ----------
+
+
+class AuditResponse(BaseModel):
+    auditLog: list[AuditEntry]
+
+
+# ---------- Endpoints ----------
+
+
+@router.get("/audit")
+def get_audit(state: Annotated[ServerState, Depends(get_state)]) -> AuditResponse:
+    """
+    Admin endpoint for checking the complete audit log currently recorded.
+    """
+    return AuditResponse(auditLog=state.audit.entries)

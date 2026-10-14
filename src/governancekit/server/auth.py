@@ -11,13 +11,23 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import Annotated
 
 import jwt
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pwdlib import PasswordHash
+from pydantic import BaseModel
+
+from governancekit.server.state import ServerState, get_state
 
 ADMIN_ID = "admin"
 ALGORITHM = "HS256"
 TOKEN_LIFETIME = timedelta(minutes=15)
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+router = APIRouter(tags=["auth"])
 
 
 class Role(StrEnum):
@@ -107,3 +117,63 @@ class Authenticator:
             options={"require": ["sub", "role", "exp"]},
         )
         return Principal(id=claims["sub"], role=Role(claims["role"]))
+
+
+# ---------- Request / response schemas ----------
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+# ---------- Dependencies ----------
+
+
+def current_principal(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    state: Annotated[ServerState, Depends(get_state)],
+) -> Principal:
+    try:
+        return state.auth.verify_token(token)
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from e
+
+
+def require_admin(
+    principal: Annotated[Principal, Depends(current_principal)],
+) -> Principal:
+    if principal.role != Role.ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires an admin token")
+    return principal
+
+
+def require_agent(
+    principal: Annotated[Principal, Depends(current_principal)],
+) -> Principal:
+    if principal.role != Role.AGENT:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires an agent token")
+    return principal
+
+
+# ---------- Endpoints ----------
+
+
+@router.post("/token")
+def login(
+    form: Annotated[OAuth2PasswordRequestForm, Depends()],
+    state: Annotated[ServerState, Depends(get_state)],
+) -> TokenResponse:
+    """Exchange an ID (username) and secret (password) for a bearer token."""
+    principal = state.auth.authenticate(form.username, form.password)
+    if principal is None:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Wrong ID or secret",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return TokenResponse(access_token=state.auth.create_token(principal))
