@@ -4,6 +4,7 @@ import { AgentList } from './features/Agents'
 import { AuditLog } from './features/AuditLog'
 import { AuthProvider, LoginForm, LogoutButton, useAuth } from './features/Auth'
 import { ModelList } from './features/Models'
+//import { TraceMonitorList } from './features/TraceMonitors'
 import './App.css'
 
 function App() {
@@ -28,6 +29,7 @@ function Layout() {
           <AuditLog />
           <AgentList />
           <ModelList />
+
         </>
       ) : (
         <LoginForm />
