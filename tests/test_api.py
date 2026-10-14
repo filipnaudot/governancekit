@@ -266,6 +266,37 @@ def test_add_invalid_model_returns_400(client):
     assert response.status_code == 400
 
 
+def test_list_models(client):
+    existence_id = _add_model(client, EXISTENCE_DECL)
+    precedence_id = _add_model(client, PRECEDENCE_DECL)
+
+    response = client.get("/models")
+
+    assert response.status_code == 200
+    assert response.json()["models"] == [
+        {"model_id": existence_id, "constraint_count": 1},
+        {"model_id": precedence_id, "constraint_count": 1},
+    ]
+
+
+def test_get_model_returns_decl_text(client):
+    model_id = _add_model(client, PRECEDENCE_DECL)
+
+    response = client.get(f"/models/{model_id}")
+
+    assert response.status_code == 200
+    assert response.json() == {"model_id": model_id, "decl": PRECEDENCE_DECL}
+
+
+def test_get_unknown_model_returns_404(client):
+    assert client.get("/models/nope").status_code == 404
+
+
+def test_viewing_models_requires_admin(agent):
+    assert agent.get("/models").status_code == 403
+    assert agent.get("/models/nope").status_code == 403
+
+
 def test_remove_model(client):
     model_id = _add_model(client, EXISTENCE_DECL)
 
