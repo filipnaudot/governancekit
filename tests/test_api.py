@@ -494,3 +494,123 @@ def test_audit_records_begin_and_finish(client, agent):
         "completed",
         begin["instance_id"],
     )
+
+
+def test_trace_audit_contains_only_that_trace(client, agent):
+    model_id = _add_model(client, EXISTENCE_DECL)
+    trace_id = _start_trace(agent, model_id)
+    _start_trace(agent, model_id)  # another trace, which must not show up
+    _complete(agent, trace_id, "login")
+
+    log = client.get(f"/traces/{trace_id}/audit").json()["auditLog"]
+
+    assert {e["trace_id"] for e in log} == {trace_id}
+    assert [e["action"] for e in log] == ["start_trace", "begin", "finish"]
+
+
+def test_trace_audit_is_kept_after_trace_ends(client, agent):
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+    agent.post(f"/traces/{trace_id}/end")
+
+    response = client.get(f"/traces/{trace_id}/audit")
+
+    assert response.status_code == 200
+    assert [e["action"] for e in response.json()["auditLog"]] == [
+        "start_trace",
+        "end_trace",
+    ]
+
+
+def test_trace_audit_of_unknown_trace_returns_404(client):
+    assert client.get("/traces/unknown/audit").status_code == 404
+
+
+def test_trace_audit_requires_admin(client, agent):
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+
+    assert agent.get(f"/traces/{trace_id}/audit").status_code == 403
+
+
+def test_added_agent_can_work_on_trace(app, client, agent):
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+    other_id, other_secret = _register_agent(client, "other-agent")
+    other = _logged_in(app, other_id, other_secret)
+
+    response = client.post(f"/traces/{trace_id}/agents", json={"agent_id": other_id})
+
+    assert response.status_code == 200
+    assert other_id in response.json()["agent_ids"]
+    _complete(other, trace_id, "login")
+    log = client.get(f"/traces/{trace_id}/audit").json()["auditLog"]
+    assert other_id in {e["agent_id"] for e in log}
+
+
+def test_add_unknown_agent_to_trace_returns_404(client, agent):
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+
+    response = client.post(f"/traces/{trace_id}/agents", json={"agent_id": "nobody"})
+
+    assert response.status_code == 404
+
+
+def test_add_agent_to_ended_trace_returns_409(client, agent, agent_id):
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+    agent.post(f"/traces/{trace_id}/end")
+
+    response = client.post(f"/traces/{trace_id}/agents", json={"agent_id": agent_id})
+
+    assert response.status_code == 409
+
+
+def test_adding_agents_requires_admin(client, agent, agent_id):
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+
+    response = agent.post(f"/traces/{trace_id}/agents", json={"agent_id": agent_id})
+
+    assert response.status_code == 403
+
+
+def test_list_traces_filters_running_and_ended(client, agent, agent_id):
+    model_id = _add_model(client, EXISTENCE_DECL)
+    running_id = _start_trace(agent, model_id)
+    ended_id = _start_trace(agent, model_id)
+    agent.post(f"/traces/{ended_id}/end")
+
+    all_traces = client.get("/traces").json()["traces"]
+    running = client.get("/traces", params={"ended": False}).json()["traces"]
+    ended = client.get("/traces", params={"ended": True}).json()["traces"]
+
+    assert [t["trace_id"] for t in all_traces] == [ended_id, running_id]
+    assert [t["trace_id"] for t in running] == [running_id]
+    assert [t["trace_id"] for t in ended] == [ended_id]
+    assert running[0]["ended_at"] is None and running[0]["violations"] is None
+    assert ended[0]["violations"] == ["Existence[login, 1] |||"]
+    assert ended[0]["agent_ids"] == [agent_id]
+    assert ended[0]["entry_count"] == 2  # start and end
+
+
+def test_listing_traces_requires_admin(agent):
+    assert agent.get("/traces").status_code == 403
+
+
+def test_list_monitors_shows_running_traces_only(client, agent, agent_id):
+    model_id = _add_model(client, EXISTENCE_DECL)
+    running_id = _start_trace(agent, model_id)
+    ended_id = _start_trace(agent, model_id)
+    agent.post(f"/traces/{ended_id}/end")
+    instance_id = _begin(agent, running_id, "login")["instance_id"]
+
+    monitors = client.get("/monitors").json()["monitors"]
+
+    assert [m["trace_id"] for m in monitors] == [running_id]
+    monitor = monitors[0]
+    assert (monitor["model_id"], monitor["agent_ids"]) == (model_id, [agent_id])
+    assert [(r["instance_id"], r["activity"]) for r in monitor["running"]] == [
+        (instance_id, "login")
+    ]
+    # login has begun but not completed, so Existence is not satisfied yet
+    assert monitor["violations"] == ["Existence[login, 1] |||"]
+
+
+def test_listing_monitors_requires_admin(agent):
+    assert agent.get("/monitors").status_code == 403

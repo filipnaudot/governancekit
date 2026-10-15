@@ -6,7 +6,7 @@
 #   login_agent
 #   load_model scenarios/support_agent.decl
 #   start_trace
-#   act view_account               # begin, and finish as completed if allowed
+#   act view_account               # begin, take $ACT_SECONDS, and finish as completed if allowed
 #   begin approve_refund           # begin only; leaves it running in $INSTANCE
 #   running                        # activities that have begun but not finished
 #   finish failed                  # finish $INSTANCE: completed (default), failed or aborted
@@ -15,6 +15,9 @@
 #   show_audit [TRACE_ID]          # admin: audit log, optionally for one trace
 
 BASE="${BASE:-http://localhost:8000}"
+# How long act spends performing an allowed activity, so it can be seen running
+# in the frontend. ACT_SECONDS=0 to finish at once.
+ACT_SECONDS="${ACT_SECONDS:-5}"
 
 # _post TOKEN PATH [JSON]
 _post() {
@@ -120,7 +123,8 @@ act() {
     response=$(_post "$AGENT_TOKEN" "/traces/$TRACE/activities" "{\"activity\": \"$1\"}")
     decision=$(echo "$response" | _field decision)
     if [ "$decision" = "allowed" ]; then
-        echo "ALLOWED  $1"
+        echo "ALLOWED  $1 (performing for ${ACT_SECONDS}s)"
+        sleep "$ACT_SECONDS"
         finish completed "$(echo "$response" | _field instance_id)"
     else
         echo "$(echo "$decision" | tr '[:lower:]' '[:upper:]')  $1"

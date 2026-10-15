@@ -10,7 +10,7 @@ token. The admin secret is read from GK_ADMIN_SECRET and the JWT signing key
 from GK_JWT_SECRET; if unset, random ones are generated at startup.
 
 The endpoints live in routers, one module per area: auth, agents, models,
-traces and audit.
+traces, monitors and audit.
 """
 
 import logging
@@ -21,9 +21,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from governancekit.engine.monitor_registry import MonitorRegistry
-from governancekit.server import agents, audit, auth, models, traces
+from governancekit.server import agents, audit, auth, models, monitors, traces
+from governancekit.server.agents import AgentRegistry
 from governancekit.server.audit import AuditLog
 from governancekit.server.auth import Authenticator
+from governancekit.server.monitors import TraceMonitors
 from governancekit.server.state import ServerState
 
 logger = logging.getLogger(__name__)
@@ -41,10 +43,19 @@ def create_app(
         logger.warning("GK_ADMIN_SECRET is not set. Admin secret: %s", admin_secret)
 
     # In-memory state: lost when the server restarts
+    agent_registry = AgentRegistry()
+    engine_monitor = MonitorRegistry()
+    audit_log = AuditLog()
     app.state.gk = ServerState(
-        auth=Authenticator(jwt_secret=jwt_secret, admin_secret=admin_secret),
-        registry=MonitorRegistry(),
-        audit=AuditLog(),
+        auth=Authenticator(
+            jwt_secret=jwt_secret, admin_secret=admin_secret, agents=agent_registry
+        ),
+        agents=agent_registry,
+        engine_monitor=engine_monitor,
+        server_audit=audit_log,
+        server_monitors=TraceMonitors(
+            engine_monitor=engine_monitor, audit=audit_log
+        ),
     )
 
     app.include_router(auth.router)
@@ -52,6 +63,7 @@ def create_app(
     app.include_router(agents.router)
     app.include_router(models.router)
     app.include_router(traces.router)
+    app.include_router(monitors.router)
 
     # Let the frontend call the API.
     app.add_middleware(

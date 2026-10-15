@@ -52,7 +52,7 @@ def add_model(
     """Register an MP-Declare model and return its generated ID."""
     model_id = str(uuid.uuid4())
     try:
-        state.registry.add_model(model_id=model_id, model_text=body.decl)
+        state.engine_monitor.add_model(model_id=model_id, model_text=body.decl)
     except ValueError as e:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"Unable to add model: {e}"
@@ -68,7 +68,7 @@ def list_models(state: Annotated[ServerState, Depends(get_state)]) -> ModelListR
     return ModelListResponse(
         models=[
             ModelInfo(model_id=model_id, constraint_count=len(model.constraints))
-            for model_id, model in state.registry.models.items()
+            for model_id, model in state.engine_monitor.models.items()
         ]
     )
 

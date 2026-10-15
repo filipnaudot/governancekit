@@ -112,6 +112,30 @@ th {
   margin-top: 24px;
 }
 
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.tabs button {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.tabs button[aria-selected='true'] {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+tr.details h3 {
+  margin: 16px 0 8px;
+  font-size: 16px;
+}
+
 tr.clickable {
   cursor: pointer;
 }
