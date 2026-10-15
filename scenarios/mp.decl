@@ -1,0 +1,20 @@
+activity verify_identity
+bind verify_identity: method
+activity view_account
+activity approve_refund
+bind approve_refund: amount, approver_role, resource
+activity issue_refund
+bind issue_refund: amount, resource
+activity close_ticket
+bind close_ticket: status
+
+method: bankid, password, sms
+amount: integer between 0 and 50000
+approver_role: agent, supervisor
+resource: anna, erik, sara
+status: resolved, unresolved
+
+Precedence[verify_identity, view_account] | |T.method in (bankid, sms) |0,10,m
+Precedence[approve_refund, issue_refund] |A.amount > 10000 |T.approver_role is supervisor and different resource |0,2,d
+Response[approve_refund, issue_refund] | |same amount |0,48,h
+Existence[close_ticket, 1] |A.status is resolved | |
