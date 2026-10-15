@@ -9,23 +9,6 @@ about how they are computed. Paths are relative to `src/governancekit/`.
 - **`server/`**: FastAPI app serving the engine, with agents, authentication and an audit log.
 - **`frontend/`**: React admin UI for the server.
 
-```mermaid
-flowchart LR
-    decl[".decl text"] --> parser["decl_parser + conditions"]
-    parser --> defs["ConstraintDefs"]
-    defs --> model["MPDeclareModel"]
-
-    subgraph registry["MonitorRegistry"]
-        model
-        model --> tm1["TraceMonitor (trace 1)"]
-        model --> tm2["TraceMonitor (trace 2)"]
-        tm1 --> ci1["constraint instances"]
-        tm2 --> ci2["constraint instances"]
-    end
-
-    server["server/"] --> registry
-```
-
 A model is built once and shared by its traces; all state that changes lives in each trace's
 `TraceMonitor` and its constraint instances.
 

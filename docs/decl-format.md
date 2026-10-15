@@ -1,7 +1,7 @@
 # Writing models (.decl)
 
 A model is a text file with one statement per line. This is the support-ticket model from
-[`scenarios/mp.decl`](../scenarios/mp.decl); its rules are explained in [concepts.md](concepts.md).
+[`scenarios/mp.decl`](../scenarios/mp.decl).
 
 ```
 activity verify_identity
@@ -106,7 +106,7 @@ min,max,unit
 with unit `s` (seconds), `m` (minutes), `h` (hours) or `d` (days). It holds if the target is between `min`
 and `max` apart from the activation, in either direction: `0,48,h` is at most 48 hours, `1,2,h` between
 one and two hours. The time between two activities is measured from the earlier one's completion to the
-later one's begin (see [concepts.md](concepts.md#time)).
+later one's begin (see [concepts.md](concepts.md#rules)).
 
 ## Templates
 

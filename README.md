@@ -1,10 +1,7 @@
 # GovernanceKit
 
-Runtime governance for AI agents. Before an agent performs an action, GovernanceKit checks it against a
-process model and answers whether it may go ahead. The model is written in **MP-Declare**: constraints
-such as "an account may only be viewed after the customer's identity was verified by BankID or SMS in the
-last 10 minutes", or "a refund over 10 000 needs a supervisor's approval, by someone other than the one
-issuing it". The agent is stopped *before* it breaks a rule, not told afterwards.
+Runtime governance for AI agents. Before an agent performs an action, GovernanceKit checks it against an
+**MP-Declare** process model and answers whether it may go ahead.
 
 Use it as a Python library inside your own agent code, or run it as a service (HTTP API + web frontend)
 that your agents call.
