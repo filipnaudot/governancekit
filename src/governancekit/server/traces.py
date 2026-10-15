@@ -338,7 +338,10 @@ def running_activities(
         ]
     )
 
-
+"""
+TODO: The endpoint does not do anyting except record that the admin has added 
+a new agent to the system. It does not update the server state.  
+"""
 @router.post(
     "/traces/{trace_id}/agents",
     tags=["management"],
