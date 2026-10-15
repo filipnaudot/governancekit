@@ -51,6 +51,10 @@ _TEMPLATES_BY_NAME = {t.value.replace(" ", "").replace("-", ""): t for t in Temp
 
 
 def parse_decl_text(text: str) -> list[ConstraintDef]:
+    """Parse .decl text into one ConstraintDef per constraint line.
+
+    Raises ValueError for undeclared activities and invalid conditions.
+    """
     activities: set[str] = set()
     bindings: dict[str, set[str]] = defaultdict(set)
     domains: dict[str, set[str]] = defaultdict(set)

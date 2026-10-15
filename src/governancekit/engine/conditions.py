@@ -20,6 +20,7 @@ __all__ = [
 
 
 def create_activation_condition(condition_text: str) -> Callable[[Event], bool] | None:
+    """Compile an activation condition to f(A), or None if empty."""
     return (
         _compile(condition_text, with_target=False) if condition_text.strip() else None
     )
@@ -28,6 +29,7 @@ def create_activation_condition(condition_text: str) -> Callable[[Event], bool] 
 def create_correlation_condition(
     condition_text: str,
 ) -> Callable[[Event, Event], bool] | None:
+    """Compile a correlation condition to f(A, T), or None if empty."""
     return (
         _compile(condition_text, with_target=True) if condition_text.strip() else None
     )

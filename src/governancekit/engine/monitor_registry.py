@@ -57,14 +57,14 @@ class MonitorRegistry:
             model_text: Model definition in MP-DECLARE syntax.
 
         Raises:
-            ValueError: If model_id is already registrered or syntax error in
+            ValueError: If model_id is already registered or syntax error in
                         model definition.
         """
         constraints: list[ConstraintDef] = parse_decl_text(model_text)
         model = MPDeclareModel.build(constraints)
         with self._lock:
             if model_id in self.models:
-                raise ValueError("Model id {model_id!r} is already registrered.")
+                raise ValueError(f"Model id {model_id!r} is already registered.")
             self.models[model_id] = model
 
     def start_monitor(self, model_id: str, trace_id: str) -> None:

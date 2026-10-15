@@ -1,5 +1,19 @@
+# GovernanceKit as a service: the API on :8000 and the frontend on :3000.
+# Usage: docker compose up --build
+# Secrets come from .env (copy .env.example). Without them the API generates
+# its own and prints the admin secret in its logs: docker compose logs api
 services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+
   frontend:
     build: ./frontend
     ports:
       - "3000:80"
+    depends_on:
+      - api
