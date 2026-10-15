@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Demo: one agent works through a refund ticket, then the admin inspects the
 # known agents and the audit log.
-# Usage (server must be running, see ./rebuild.sh): ./scenarios/demo.sh
+# Usage (server must be running: docker compose up --build): ./scenarios/demo.sh
 #
 # Afterwards, inspect the server yourself from the terminal:
 #   source scenarios/agent.sh
@@ -16,7 +16,7 @@ cd "$(dirname "$0")/.."
 source scenarios/agent.sh
 
 if ! curl -sf "$BASE/docs" >/dev/null; then
-    echo "No server at $BASE. Start it with ./rebuild.sh" >&2
+    echo "No server at $BASE. Start it with: docker compose up --build" >&2
     exit 1
 fi
 

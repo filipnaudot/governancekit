@@ -1,8 +1,21 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "governancekit"
 version = "0.1.0"
-requires-python = ">=3.10"
-dependencies = [
+description = "Runtime governance for AI agents: check each action against an MP-Declare process model before it runs."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+# The engine (governancekit.engine) uses only the standard library.
+dependencies = []
+
+[project.optional-dependencies]
+# The web server (governancekit.server), for running GovernanceKit as a service
+server = [
     "fastapi>=0.141",
     "pwdlib[argon2]>=0.3",
     "pydantic>=2.13",
@@ -10,6 +23,15 @@ dependencies = [
     "python-multipart>=0.0.32",
     "uvicorn>=0.53",
 ]
+dev = [
+    "governancekit[server]",
+    "httpx",  # used by FastAPI's TestClient
+    "pytest",
+    "pytest-benchmark",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

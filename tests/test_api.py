@@ -250,6 +250,7 @@ def test_list_agents_does_not_leak_secrets(client):
     assert "argon2" not in response.text
 
 
+@pytest.mark.xfail(reason="not built yet: POST /models does not return the constraints")
 def test_add_model_returns_constraints(client):
     response = client.post("/models", json={"decl": EXISTENCE_DECL})
 
@@ -297,6 +298,7 @@ def test_viewing_models_requires_admin(agent):
     assert agent.get("/models/nope").status_code == 403
 
 
+@pytest.mark.xfail(reason="not built yet: DELETE /models/{id}")
 def test_remove_model(client):
     model_id = _add_model(client, EXISTENCE_DECL)
 

@@ -79,4 +79,5 @@ _BUILDERS = {
 
 
 def build_instance(definition: ConstraintDef) -> ConstraintInstance:
+    """Create the constraint instance for a definition."""
     return _BUILDERS[definition.template](definition)

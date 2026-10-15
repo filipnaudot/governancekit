@@ -1,6 +1,15 @@
-# Development overrides: run the frontend from the working tree with hot reload.
+# Development overrides: run the API and the frontend from the working tree
+# with hot reload.
 # Usage: docker compose -f compose.yaml -f compose.dev.yaml up --build
 services:
+  api:
+    command: ["uvicorn", "governancekit.server.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    environment:
+      # Import the mounted source instead of the copy installed in the image
+      PYTHONPATH: /app/src
+    volumes:
+      - ./src:/app/src
+
   frontend:
     build:
       target: dev

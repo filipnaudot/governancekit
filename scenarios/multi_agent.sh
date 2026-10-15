@@ -14,7 +14,7 @@
 # Every agent checks an activity first, and begins it only if the check allows
 # it (see act in scenarios/agent.sh).
 #
-# Usage (server must be running, see ./rebuild.sh): ./scenarios/multi_agent.sh
+# Usage (server must be running: docker compose up --build): ./scenarios/multi_agent.sh
 # Follow it live in the frontend's Monitors tab.
 
 set -eo pipefail
@@ -24,7 +24,7 @@ cd "$(dirname "$0")/.."
 source scenarios/agent.sh
 
 if ! curl -sf "$BASE/docs" >/dev/null; then
-    echo "No server at $BASE. Start it with ./rebuild.sh" >&2
+    echo "No server at $BASE. Start it with: docker compose up --build" >&2
     exit 1
 fi
 

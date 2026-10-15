@@ -63,6 +63,7 @@ class MPDeclareModel:
 
     @classmethod
     def build(cls, constraints: list[ConstraintDef]) -> Self:
+        """Build a model and its lookups from parsed constraints."""
         begin_index: dict[str, list[int]] = defaultdict(list)
         finish_index: dict[str, list[int]] = defaultdict(list)
         ordering_constraints: list[int] = []
