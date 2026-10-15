@@ -25,6 +25,7 @@ from governancekit.server import agents, audit, auth, models, monitors, traces
 from governancekit.server.agents import AgentRegistry
 from governancekit.server.audit import AuditLog
 from governancekit.server.auth import Authenticator
+from governancekit.server.monitors import TraceMonitors
 from governancekit.server.state import ServerState
 
 logger = logging.getLogger(__name__)
@@ -43,13 +44,18 @@ def create_app(
 
     # In-memory state: lost when the server restarts
     agent_registry = AgentRegistry()
+    engine_monitor = MonitorRegistry()
+    audit_log = AuditLog()
     app.state.gk = ServerState(
         auth=Authenticator(
             jwt_secret=jwt_secret, admin_secret=admin_secret, agents=agent_registry
         ),
         agents=agent_registry,
-        registry=MonitorRegistry(),
-        audit=AuditLog(),
+        engine_monitor=engine_monitor,
+        server_audit=audit_log,
+        server_monitors=TraceMonitors(
+            engine_monitor=engine_monitor, audit=audit_log
+        ),
     )
 
     app.include_router(auth.router)

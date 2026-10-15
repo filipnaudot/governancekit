@@ -1,13 +1,17 @@
 """
-Runtime endpoints for the GovernanceKit web server.
+Traces for the GovernanceKit web server, and the runtime endpoints agents use.
+
+A Trace is a running trace: its model, the agents allowed to work on it, and
+the history of what they did so far. RunningTraces keeps the running traces.
+Both are managed by TraceMonitors (see monitors.py), which the endpoints call.
 
 Agents start and end traces, and check, begin and finish activities on them.
 Several activities may run at the same time on one trace. The agent that
-starts a trace may work on it; admins can add more agents. Every request is
-recorded in the audit log.
+starts a trace may work on it; admins can add more agents.
 """
 
-import uuid
+import threading
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
@@ -16,11 +20,61 @@ from pydantic import AwareDatetime, BaseModel, Field
 
 from governancekit.engine.decision import Decision
 from governancekit.engine.events import Event
-from governancekit.server.audit import Action, ActivityStatus, AuditEntry
+from governancekit.server.audit import ActivityStatus, AuditEntry
 from governancekit.server.auth import Principal, require_admin, require_agent
 from governancekit.server.state import ServerState, get_state
 
 router = APIRouter(tags=["runtime"])
+
+
+@dataclass
+class Trace:
+    """
+    A running trace. Hold its lock while reading or changing it.
+    """
+
+    trace_id: str
+    model_id: str
+    agent_ids: set[str]  # The agents allowed to work on the trace
+    started_at: datetime
+    entries: list[AuditEntry] = field(default_factory=list)  # In recorded order
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+
+class RunningTraces:
+    """
+    The running traces, kept in memory, keyed by trace ID.
+
+    Thread-safe: requests are handled on several threads.
+    """
+
+    def __init__(self):
+        self._traces: dict[str, Trace] = {}
+        self._lock = threading.Lock()
+
+    def add(self, trace: Trace) -> None:
+        with self._lock:
+            self._traces[trace.trace_id] = trace
+
+    def remove(self, trace_id: str) -> Trace:
+        """
+        Raises:
+            KeyError: If the trace is not running.
+        """
+        with self._lock:
+           return self._traces.pop(trace_id)
+
+    def get(self, trace_id: str) -> Trace | None:
+        """The running trace, or None if it is not running."""
+        with self._lock:
+            return self._traces.get(trace_id)
+
+    @property
+    def traces(self) -> list[Trace]:
+        """All running traces."""
+        with self._lock:
+            return list(self._traces.values())
+
 
 # ---------- Request / response schemas ----------
 
@@ -101,18 +155,20 @@ class TraceAgentsResponse(BaseModel):
     agent_ids: list[str]
 
 
-# ---------- Helpers ----------
-
-
-def check_trace_access(state: ServerState, trace_id: str, agent: Principal) -> None:
-    """Allow only the agents added to a running trace."""
-    record = state.audit.traces.get(trace_id)
-    # A trace the agent is not on is reported as missing, so its ID is not revealed
-    if record is None or record.ended_at is not None or agent.id not in record.agent_ids:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {trace_id!r}")
-
-
 # ---------- Endpoints ----------
+
+
+def not_found(trace_id: str) -> HTTPException:
+    return HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {trace_id!r}")
+
+
+def running_activity(instance_id: str, event: Event) -> RunningActivity:
+    return RunningActivity(
+        instance_id=instance_id,
+        activity=event.activity,
+        payload=event.payload,
+        timestamp=event.timestamp,
+    )
 
 
 @router.post("/traces", status_code=status.HTTP_201_CREATED)
@@ -122,29 +178,12 @@ def start_trace(
     state: Annotated[ServerState, Depends(get_state)],
 ) -> TraceOut:
     """Start a trace on a model. The calling agent is its first agent."""
-
-    # Generate the trace ID
-    trace_id = str(uuid.uuid4())
-
-    # Start the monitoring of a trace.
     try:
-        state.registry.start_monitor(model_id=body.model_id, trace_id=trace_id)
+        trace_id = state.server_monitors.start_trace(
+            model_id=body.model_id, agent_id=agent.id
+        )
     except KeyError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Unknown model: {e}") from e
-
-    # Update server state, and add a audit to the audit log.
-    state.audit.start_trace(trace_id=trace_id, model_id=body.model_id, agent_id=agent.id)
-
-    # Log start trace as an action in audit log.
-    state.audit.add_audit(
-        # Create the entry
-        AuditEntry(
-            received_at=datetime.now(UTC),
-            agent_id=agent.id,
-            trace_id=trace_id,
-            action=Action.START_TRACE,
-        )
-    )
     return TraceOut(trace_id=trace_id, model_id=body.model_id, agent_id=agent.id)
 
 
@@ -160,48 +199,16 @@ def end_trace(
     If activities are still running, the request is rejected with 409,
     unless abort_running is true; then they are aborted first.
     """
-    check_trace_access(state, trace_id, agent)
     try:
-        violations = state.registry.violations(trace_id=trace_id)
-        aborted = state.registry.end_monitor(
-            trace_id=trace_id, abort_running=abort_running
+        violations = state.server_monitors.end_trace(
+            trace_id=trace_id, agent_id=agent.id, abort_running=abort_running
         )
     except KeyError as e:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {e}") from e
+        raise not_found(trace_id) from e
     except ValueError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
-
-    for instance_id, event in aborted.items():
-        state.audit.add_audit(
-            AuditEntry(
-                received_at=datetime.now(UTC),
-                agent_id=agent.id,
-                trace_id=trace_id,
-                action=Action.FINISH,
-                activity=event.activity,
-                event_timestamp=event.timestamp,
-                instance_id=instance_id,
-                status=ActivityStatus.ABORTED,
-            )
-        )
-
-    # Log an End trace.
-    state.audit.add_audit(
-        AuditEntry(
-            received_at=datetime.now(UTC),
-            agent_id=agent.id,
-            trace_id=trace_id,
-            action=Action.END_TRACE,
-            violations=violations,
-        )
-    )
-    # Update the state to end trace.
-    state.audit.end_trace(trace_id, violations)
-
     return EndTraceResponse(
-        trace_id=trace_id,
-        conformant=not violations,
-        violations=violations,
+        trace_id=trace_id, conformant=not violations, violations=violations
     )
 
 
@@ -217,25 +224,13 @@ def check(
     The answer can be outdated by the time the agent acts; begin the
     activity before performing it.
     """
-    check_trace_access(state, trace_id, agent)
     event = Event(activity=body.activity, timestamp=body.timestamp, payload=body.payload)
     try:
-        decision, blocking = state.registry.check_event(trace_id=trace_id, event=event)
-    except KeyError as e:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {e}") from e
-
-    state.audit.add_audit(
-        AuditEntry(
-            received_at=datetime.now(UTC),
-            agent_id=agent.id,
-            trace_id=trace_id,
-            action=Action.CHECK,
-            activity=body.activity,
-            event_timestamp=body.timestamp,
-            decision=decision,
-            violations=blocking,
+        decision, blocking = state.server_monitors.check(
+            trace_id=trace_id, agent_id=agent.id, event=event
         )
-    )
+    except KeyError as e:
+        raise not_found(trace_id) from e
     return CheckResponse(decision=decision, blocking=blocking)
 
 
@@ -251,28 +246,13 @@ def begin(
     allowed: perform it, then finish it with the returned instance_id.
     wait: not now, ask again later. denied: don't perform it.
     """
-    check_trace_access(state, trace_id, agent)
     event = Event(activity=body.activity, timestamp=body.timestamp, payload=body.payload)
     try:
-        decision, instance_id, blocking = state.registry.begin_event(
-            trace_id=trace_id, event=event
+        decision, instance_id, blocking = state.server_monitors.begin(
+            trace_id=trace_id, agent_id=agent.id, event=event
         )
     except KeyError as e:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {e}") from e
-
-    state.audit.add_audit(
-        AuditEntry(
-            received_at=datetime.now(UTC),
-            agent_id=agent.id,
-            trace_id=trace_id,
-            action=Action.BEGIN,
-            activity=body.activity,
-            event_timestamp=body.timestamp,
-            decision=decision,
-            instance_id=instance_id,
-            violations=blocking,
-        )
-    )
+        raise not_found(trace_id) from e
     return BeginResponse(decision=decision, instance_id=instance_id, blocking=blocking)
 
 
@@ -288,30 +268,17 @@ def finish(
     state: Annotated[ServerState, Depends(get_state)],
 ) -> None:
     """Report how a running activity ended. Only completed ones count."""
-    check_trace_access(state, trace_id, agent)
     try:
-        event = state.registry.finish_event(
+        state.server_monitors.finish(
             trace_id=trace_id,
+            agent_id=agent.id,
             instance_id=instance_id,
-            completed=body.status is ActivityStatus.COMPLETED,
+            activity_status=body.status,
         )
     except KeyError as e:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, f"Trace or activity not found: {e}"
         ) from e
-
-    state.audit.add_audit(
-        AuditEntry(
-            received_at=datetime.now(UTC),
-            agent_id=agent.id,
-            trace_id=trace_id,
-            action=Action.FINISH,
-            activity=event.activity,
-            event_timestamp=event.timestamp,
-            instance_id=instance_id,
-            status=body.status,
-        )
-    )
 
 
 @router.get("/traces/{trace_id}/activities")
@@ -321,27 +288,18 @@ def running_activities(
     state: Annotated[ServerState, Depends(get_state)],
 ) -> RunningActivitiesResponse:
     """Activities that have begun but not finished on this trace."""
-    check_trace_access(state, trace_id, agent)
     try:
-        running = state.registry.unfinished(trace_id=trace_id)
+        running = state.server_monitors.unfinished(trace_id=trace_id, agent_id=agent.id)
     except KeyError as e:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {e}") from e
+        raise not_found(trace_id) from e
     return RunningActivitiesResponse(
         activities=[
-            RunningActivity(
-                instance_id=instance_id,
-                activity=event.activity,
-                payload=event.payload,
-                timestamp=event.timestamp,
-            )
+            running_activity(instance_id, event)
             for instance_id, event in running.items()
         ]
     )
 
-"""
-TODO: The endpoint does not do anyting except record that the admin has added 
-a new agent to the system. It does not update the server state.  
-"""
+
 @router.post(
     "/traces/{trace_id}/agents",
     tags=["management"],
@@ -353,17 +311,19 @@ def add_agent(
     state: Annotated[ServerState, Depends(get_state)],
 ) -> TraceAgentsResponse:
     """Admin endpoint. Let another agent work on a running trace."""
-    record = state.audit.traces.get(trace_id)
-    if record is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {trace_id!r}")
-    if record.ended_at is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, f"Trace has ended: {trace_id!r}")
     if body.agent_id not in state.agents.agents:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, f"Unknown agent: {body.agent_id!r}"
         )
-    record.agent_ids.add(body.agent_id)
-    return TraceAgentsResponse(trace_id=trace_id, agent_ids=sorted(record.agent_ids))
+    try:
+        agent_ids = state.server_monitors.add_agent(
+            trace_id=trace_id, agent_id=body.agent_id
+        )
+    except KeyError as e:
+        raise not_found(trace_id) from e
+    except ValueError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    return TraceAgentsResponse(trace_id=trace_id, agent_ids=sorted(agent_ids))
 
 
 @router.get("/traces", tags=["management"], dependencies=[Depends(require_admin)])
@@ -375,15 +335,23 @@ def list_traces(
 
     ended=false gives only the running traces, ended=true only the ended ones.
     """
-    records = [
-        record
-        for record in state.audit.traces.values()
-        if ended is None or (record.ended_at is not None) == ended
-    ]
-    records.sort(key=lambda record: record.started_at, reverse=True)
-    return TraceListResponse(
-        traces=[
-            TraceSummary(
+    # Keyed by trace ID: a trace that ends while we read is listed once, as ended
+    summaries: dict[str, TraceSummary] = {}
+    if ended is not True:
+        for trace in state.server_monitors.running_traces.traces:
+            with trace.lock:
+                summaries[trace.trace_id] = TraceSummary(
+                    trace_id=trace.trace_id,
+                    model_id=trace.model_id,
+                    agent_ids=sorted(trace.agent_ids),
+                    started_at=trace.started_at,
+                    ended_at=None,
+                    violations=None,
+                    entry_count=len(trace.entries),
+                )
+    if ended is not False:
+        for record in state.server_audit.records:
+            summaries[record.trace_id] = TraceSummary(
                 trace_id=record.trace_id,
                 model_id=record.model_id,
                 agent_ids=sorted(record.agent_ids),
@@ -392,6 +360,8 @@ def list_traces(
                 violations=record.violations,
                 entry_count=len(record.entries),
             )
-            for record in records
-        ]
+    return TraceListResponse(
+        traces=sorted(
+            summaries.values(), key=lambda summary: summary.started_at, reverse=True
+        )
     )

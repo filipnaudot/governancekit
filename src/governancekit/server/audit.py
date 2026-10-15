@@ -1,15 +1,20 @@
 """
 Audit log for the GovernanceKit web server.
 
-Keeps a record of every trace: its model, the agents working on it, and every
-request they made (starting or ending the trace, and checking, beginning or
-finishing activities), so it can later be reviewed who did what and when.
+Keeps the history of every trace that has ended: its model, the agents that
+worked on it, its verdict, and every request they made (starting or ending the
+trace, and checking, beginning or finishing activities), so it can later be
+reviewed who did what and when.
+
+While a trace runs, its history is kept on the trace itself (see traces.py);
+TraceMonitors (see monitors.py) moves it here when the trace ends.
 """
 
+import threading
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -17,6 +22,10 @@ from pydantic import BaseModel
 from governancekit.engine.decision import Decision
 from governancekit.server.auth import require_admin
 from governancekit.server.state import ServerState, get_state
+
+# Only imported for type hints, since traces imports from here
+if TYPE_CHECKING:
+    from governancekit.server.traces import Trace
 
 router = APIRouter(tags=["management"], dependencies=[Depends(require_admin)])
 
@@ -63,66 +72,56 @@ class AuditEntry:
     violations: list[str] = field(default_factory=list)  # For check, begin and end trace
 
 
-@dataclass
+@dataclass(frozen=True)
 class TraceRecord:
     """
-    What the server keeps about one trace: who works on it and what they did.
-
-    Created when the trace starts and kept after it ends, unlike the trace's
-    monitor, which is removed when the trace ends.
+    The history of a trace that has ended.
     """
 
     trace_id: str
     model_id: str
-    agent_ids: set[str]  # The agents allowed to work on the trace
+    agent_ids: frozenset[str]  # The agents that were allowed to work on the trace
     started_at: datetime
-    ended_at: datetime | None = None  # None while the trace is running
-    violations: list[str] | None = None  # The final verdict; None while running
-    entries: list[AuditEntry] = field(default_factory=list)  # In recorded order
+    ended_at: datetime
+    violations: list[str]  # The final verdict
+    entries: list[AuditEntry]  # In recorded order
 
 
 class AuditLog:
     """
-    In-memory record of every trace, running or ended.
+    In-memory history of the traces that have ended.
 
-    Attributes:
-        traces: Records of all traces, keyed by trace ID.
+    Thread-safe: requests are handled on several threads.
     """
 
-    traces: dict[str, TraceRecord]
-
     def __init__(self):
-        self.traces = {}
+        self._records: dict[str, TraceRecord] = {}
+        self._lock = threading.Lock()
 
-    def start_trace(self, trace_id: str, model_id: str, agent_id: str) -> None:
-        """Create the record of a new trace, with agent_id as its first agent."""
-        self.traces[trace_id] = TraceRecord(
-            trace_id=trace_id,
-            model_id=model_id,
-            agent_ids={agent_id},
-            started_at=datetime.now(UTC),
+    def add(self, trace: "Trace", ended_at: datetime, violations: list[str]) -> None:
+        """Keep the history of a trace that has ended."""
+        record = TraceRecord(
+            trace_id=trace.trace_id,
+            model_id=trace.model_id,
+            agent_ids=frozenset(trace.agent_ids),
+            started_at=trace.started_at,
+            ended_at=ended_at,
+            violations=violations,
+            entries=list(trace.entries),
         )
+        with self._lock:
+            self._records[trace.trace_id] = record
 
-    def end_trace(self, trace_id: str, violations: list[str]) -> None:
-        """Mark a trace as ended, with the constraints it violated."""
-        record = self.traces[trace_id]
-        record.ended_at = datetime.now(UTC)
-        record.violations = violations
-
-    def add_audit(self, audit: AuditEntry) -> None:
-        """
-        Raises:
-            KeyError: If the entry's trace was never started.
-        """
-        self.traces[audit.trace_id].entries.append(audit)
+    def get(self, trace_id: str) -> TraceRecord | None:
+        """The ended trace's record, or None if no such trace has ended."""
+        with self._lock:
+            return self._records.get(trace_id)
 
     @property
-    def entries(self) -> list[AuditEntry]:
-        """All traces' entries, ordered by when they were received."""
-        return sorted(
-            (entry for trace in self.traces.values() for entry in trace.entries),
-            key=lambda entry: entry.received_at,
-        )
+    def records(self) -> list[TraceRecord]:
+        """The records of all ended traces."""
+        with self._lock:
+            return list(self._records.values())
 
 
 # ---------- Request / response schemas ----------
@@ -138,9 +137,9 @@ class AuditResponse(BaseModel):
 @router.get("/audit")
 def get_audit(state: Annotated[ServerState, Depends(get_state)]) -> AuditResponse:
     """
-    Admin endpoint for checking the complete audit log currently recorded.
+    Admin endpoint. The entries of all traces, running or ended, oldest first.
     """
-    return AuditResponse(auditLog=state.audit.entries)
+    return AuditResponse(auditLog=state.server_monitors.all_entries())
 
 
 @router.get("/traces/{trace_id}/audit")
@@ -149,9 +148,9 @@ def get_trace_audit(
     state: Annotated[ServerState, Depends(get_state)],
 ) -> AuditResponse:
     """
-    Admin endpoint. Returns one trace's audit log, also after the trace has ended.
+    Admin endpoint. One trace's entries, while it runs and after it has ended.
     """
-    record = state.audit.traces.get(trace_id)
-    if record is None:
+    entries = state.server_monitors.entries(trace_id)
+    if entries is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {trace_id!r}")
-    return AuditResponse(auditLog=record.entries)
+    return AuditResponse(auditLog=entries)
