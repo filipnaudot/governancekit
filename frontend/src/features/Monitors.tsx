@@ -1,8 +1,9 @@
 // Trace monitors: the engine's monitors of the running traces, one per trace.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { ApiError, apiFetch, errorMessage } from '../api'
 import { formatTime } from '../format'
+import { useUpdates } from '../updates'
 import { TraceAuditLog } from './Audit'
 import { useSession } from './Auth'
 
@@ -58,10 +59,8 @@ export function MonitorList() {
     [token, logOut],
   )
 
-  // Load when the component appears
-  useEffect(() => {
-    load()
-  }, [load])
+  // Load when the component appears, and again whenever a trace changes
+  useUpdates(token, load)
 
   function toggle(traceId: string) {
     setSelected((current) => (current === traceId ? null : traceId))
@@ -71,9 +70,6 @@ export function MonitorList() {
     <section className="card">
       <div className="card-header">
         <h2>Trace Monitors</h2>
-        <button type="button" className="secondary" onClick={load}>
-          Refresh
-        </button>
       </div>
       {error && <p className="error">{error}</p>}
       {monitors === null && !error && <p>Loading…</p>}
