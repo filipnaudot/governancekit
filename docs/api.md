@@ -12,14 +12,14 @@ The API is at an early stage and will change. State is kept in memory and lost w
   log.
 - **Runtime**, for agents: start a trace on a model, check, begin and finish activities on it, and end
   it to get the verdict. Several agents can work on one trace, and several activities can run at once.
-- **Audit log**: every request on a trace is recorded (who, when, which activity, which decision), also
+- **Audit log**: every accepted request on a trace is recorded (who, when, which activity, which decision), also
   after the trace has ended.
 
 ## Main endpoints
 
 | Endpoint | Does |
 |---|---|
-| `POST /models` | Add a model, as `.decl` text (see [decl-format.md](decl-format.md)) |
+| `POST /models` | Add a model, as `.decl` text (see [decl-format.md](decl-format.md)); with `validate_payloads`, events that don't fit it get 422 |
 | `POST /traces` | Start a trace on a model |
 | `POST /traces/{trace_id}/check` | Decision for an activity, without reserving it |
 | `POST /traces/{trace_id}/activities` | Begin an activity: the decision, and an instance ID if allowed |

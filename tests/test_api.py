@@ -262,7 +262,8 @@ def test_add_model_returns_constraints(client):
 
 
 @pytest.mark.parametrize(
-    "decl", ["Existence[login] |||", "activity a\nResponse[a, a]", "activity a\nFoo[a, a] |||"]
+    "decl",
+    ["Existence[login] |||", "activity a\nResponse[a, a]", "activity a\nFoo[a, a] |||"],
 )
 def test_add_invalid_model_returns_400(client, decl):
     response = client.post("/models", json={"decl": decl})
@@ -278,8 +279,8 @@ def test_list_models(client):
 
     assert response.status_code == 200
     assert response.json()["models"] == [
-        {"model_id": existence_id, "constraint_count": 1},
-        {"model_id": precedence_id, "constraint_count": 1},
+        {"model_id": existence_id, "constraint_count": 1, "validate_payloads": False},
+        {"model_id": precedence_id, "constraint_count": 1, "validate_payloads": False},
     ]
 
 
@@ -401,6 +402,34 @@ def test_check_without_activity_returns_422(client, agent):
     response = agent.post(f"/traces/{trace_id}/check", json={})
 
     assert response.status_code == 422
+
+
+def test_invalid_event_returns_422_and_is_not_recorded(client, agent):
+    response = client.post(
+        "/models",
+        json={
+            "decl": "activity refund\nbind refund: amount, resource\n"
+            "amount: integer between 0 and 100",
+            "validate_payloads": True,
+        },
+    )
+    model_id = response.json()["model_id"]
+    trace_id = _start_trace(agent, model_id)
+    event = {"activity": "refund", "payload": {"amount": 500.5}}
+
+    check = agent.post(f"/traces/{trace_id}/check", json=event)
+    begin = agent.post(f"/traces/{trace_id}/activities", json=event)
+
+    expected = [
+        "'amount' is not an integer between 0 and 100: 500.5",
+        "missing attribute 'resource'",
+    ]
+    assert (check.status_code, check.json()["detail"]) == (422, expected)
+    assert (begin.status_code, begin.json()["detail"]) == (422, expected)
+    log = client.get(f"/traces/{trace_id}/audit").json()["auditLog"]
+    assert [e["action"] for e in log] == ["start_trace"]
+    models = client.get("/models").json()["models"]
+    assert models[0]["validate_payloads"] is True
 
 
 def test_begin_reserves_until_finish(client, agent):

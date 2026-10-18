@@ -17,8 +17,8 @@ from governancekit.engine.constraints.chain_precedence import ChainPrecedenceIns
 from governancekit.engine.constraints.chain_response import ChainResponseInstance
 from governancekit.engine.constraints.chain_succession import ChainSuccessionInstance
 from governancekit.engine.constraints.choice import ChoiceInstance
-from governancekit.engine.constraints.end import EndInstance
 from governancekit.engine.constraints.co_existence import CoExistenceInstance
+from governancekit.engine.constraints.end import EndInstance
 from governancekit.engine.constraints.exactly import ExactlyInstance
 from governancekit.engine.constraints.exclusive_choice import ExclusiveChoiceInstance
 from governancekit.engine.constraints.existence import ExistenceInstance

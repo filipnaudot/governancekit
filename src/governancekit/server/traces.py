@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import AwareDatetime, BaseModel, Field
 
 from governancekit.engine.decision import Decision
+from governancekit.engine.event_schema import InvalidEventError
 from governancekit.engine.events import Event
 from governancekit.server.audit import ActivityStatus, AuditEntry
 from governancekit.server.auth import Principal, require_admin, require_agent
@@ -62,7 +63,7 @@ class RunningTraces:
             KeyError: If the trace is not running.
         """
         with self._lock:
-           return self._traces.pop(trace_id)
+            return self._traces.pop(trace_id)
 
     def get(self, trace_id: str) -> Trace | None:
         """The running trace, or None if it is not running."""
@@ -162,6 +163,11 @@ def not_found(trace_id: str) -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, f"Trace not found: {trace_id!r}")
 
 
+def invalid_event(error: InvalidEventError) -> HTTPException:
+    # Not recorded in the trace's history: the engine raised before anything was recorded
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, error.problems)
+
+
 def running_activity(instance_id: str, event: Event) -> RunningActivity:
     return RunningActivity(
         instance_id=instance_id,
@@ -224,13 +230,17 @@ def check(
     The answer can be outdated by the time the agent acts; begin the
     activity before performing it.
     """
-    event = Event(activity=body.activity, timestamp=body.timestamp, payload=body.payload)
+    event = Event(
+        activity=body.activity, timestamp=body.timestamp, payload=body.payload
+    )
     try:
         decision, blocking = state.server_monitors.check(
             trace_id=trace_id, agent_id=agent.id, event=event
         )
     except KeyError as e:
         raise not_found(trace_id) from e
+    except InvalidEventError as e:
+        raise invalid_event(e) from e
     return CheckResponse(decision=decision, blocking=blocking)
 
 
@@ -246,13 +256,17 @@ def begin(
     allowed: perform it, then finish it with the returned instance_id.
     wait: not now, ask again later. denied: don't perform it.
     """
-    event = Event(activity=body.activity, timestamp=body.timestamp, payload=body.payload)
+    event = Event(
+        activity=body.activity, timestamp=body.timestamp, payload=body.payload
+    )
     try:
         decision, instance_id, blocking = state.server_monitors.begin(
             trace_id=trace_id, agent_id=agent.id, event=event
         )
     except KeyError as e:
         raise not_found(trace_id) from e
+    except InvalidEventError as e:
+        raise invalid_event(e) from e
     return BeginResponse(decision=decision, instance_id=instance_id, blocking=blocking)
 
 

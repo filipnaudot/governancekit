@@ -33,7 +33,8 @@ class TraceMonitor:
         """Decide if the event may begin, and reserve it if allowed.
 
         Returns the decision, the instance id (only if allowed) and the source
-        of every constraint that did not allow it.
+        of every constraint that did not allow it. Raises InvalidEventError if
+        the model checks events and this one doesn't fit.
         """
         decision, blocking = self.check(event)
         if decision is not Decision.ALLOWED:
@@ -69,8 +70,11 @@ class TraceMonitor:
         """Decide if the event may begin now, without reserving anything.
 
         Returns the decision begin() would give, and the source of every
-        constraint that does not allow it.
+        constraint that does not allow it. Raises InvalidEventError if the
+        model checks events and this one doesn't fit.
         """
+        if self.model.schema is not None:
+            self.model.schema.validate(event)
         decisions = [
             (
                 self.instances[i].definition.source,
