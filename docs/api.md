@@ -26,6 +26,7 @@ The API is at an early stage and will change. State is kept in memory and lost w
 | `POST /traces/{trace_id}/activities/{instance_id}/finish` | Finish an activity as `completed`, `failed` or `aborted` |
 | `POST /traces/{trace_id}/end` | End the trace; returns whether it is conformant and its violations |
 | `GET /monitors` | The running traces, with their running activities and current violations |
+| `GET /updates` | Server-sent events: one on connect, then one whenever a trace changes. Closes after 60 s; reconnect to keep listening |
 | `GET /audit` | The audit log |
 
 The decisions and when each is given are explained in [concepts.md](concepts.md).

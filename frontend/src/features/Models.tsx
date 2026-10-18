@@ -60,9 +60,6 @@ export function ModelList() {
     <section className="card">
       <div className="card-header">
         <h2>Declare Models</h2>
-        <button type="button" className="secondary" onClick={load}>
-          Refresh
-        </button>
       </div>
       {error && <p className="error">{error}</p>}
       {models === null && !error && <p>Loading…</p>}

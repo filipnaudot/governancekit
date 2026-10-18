@@ -3,7 +3,8 @@
 # Usage: docker compose -f compose.yaml -f compose.dev.yaml up --build
 services:
   api:
-    command: ["uvicorn", "governancekit.server.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # Without the timeout, an open frontend's update stream delays every reload
+    command: ["uvicorn", "governancekit.server.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--timeout-graceful-shutdown", "2"]
     environment:
       # Import the mounted source instead of the copy installed in the image
       PYTHONPATH: /app/src
