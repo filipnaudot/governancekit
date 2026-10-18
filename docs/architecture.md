@@ -16,7 +16,9 @@ A model is built once and shared by its traces; all state that changes lives in 
 
 ### From .decl text to a model
 
-1. `decl_parser.parse_decl_text` finds each constraint's template, activities and count.
+1. `decl_parser.parse_decl_text` finds each constraint's template, activities and count, and checks the
+   conditions against the `bind` and domain lines. It returns these too (`ParsedDecl`), for later
+   payload checks.
 2. `conditions` compiles the condition fields once into plain functions: `f(A)` for activation, `f(A, T)`
    for correlation and time.
 3. Each constraint becomes a frozen `ConstraintDef`; its `source` (the original line) is what `blocking`

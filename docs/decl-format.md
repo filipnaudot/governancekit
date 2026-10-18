@@ -5,15 +5,21 @@ One statement per line. Full example: [`scenarios/mp.decl`](../scenarios/mp.decl
 ```
 activity approve_refund
 activity issue_refund
-bind issue_refund: amount, resource       # attributes of the payload (not enforced)
-amount: integer between 0 and 50000       # allowed values (not enforced)
+bind approve_refund: resource             # attributes of the payload
+bind issue_refund: amount, resource
+amount: integer between 0 and 50000       # allowed values (optional)
 
 Precedence[approve_refund, issue_refund] | A.amount > 10000 | different resource | 0,2,d
 ```
 
 - `activity NAME`: every activity used in a constraint must be declared.
-- `bind` and value lines document the payload; they are parsed but not checked.
-- `#` starts a comment.
+- `bind NAME: attr, ...`: every attribute used in a condition must be bound to the activity it refers to
+  (in symmetric templates, the activation condition's attributes to both activities).
+- `attr: v1, v2, ...`, `attr: integer between X and Y` or `attr: float between X and Y`: optional domain of a
+  bound attribute. Values in conditions must fit it (`A.status is resolvd` is an error).
+- Bindings and domains are checked when the model is loaded; payloads are not checked against them yet.
+- Declarations may appear anywhere in the file. `#` starts a comment, except inside quotes.
+- An invalid line is reported with its line number.
 
 ## Constraint lines
 
@@ -25,8 +31,8 @@ The example above reads: every `issue_refund` with `amount > 10000` must be prec
 `approve_refund` from a different `resource`, at most 2 days earlier.
 
 - **Template**: see [Templates](#templates). Case, spaces and hyphens are ignored.
-- **Activities**: two, or one plus an optional count for `Existence`, `Absence`, `Exactly`, `Init`, `End`.
-  The count defaults to 1; `Absence[a, n]` means at most n − 1 times.
+- **Activities**: two, or one for `Existence`, `Absence`, `Exactly`, `Init`, `End`. The first three take
+  an optional count ≥ 1, which defaults to 1; `Absence[a, n]` means at most n − 1 times.
 - **Activation condition**: which occurrences of the activation the constraint applies to.
 - **Correlation condition**: which target counts for an activation.
 - **Time window**: how far apart activation and target may be.
@@ -115,5 +121,4 @@ conditions.
 ## Limits
 
 - Contradictions between constraints are not detected (`Response[a, b]` + `Absence[b]` still allows `a`).
-- A line missing a `|` or with an unknown template gives an unclear error.
-- `#` inside quoted text starts a comment.
+- Domain values can't be quoted, so they can't contain `,` or `#`.

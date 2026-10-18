@@ -60,7 +60,7 @@ class MonitorRegistry:
             ValueError: If model_id is already registered or syntax error in
                         model definition.
         """
-        constraints: list[ConstraintDef] = parse_decl_text(model_text)
+        constraints: list[ConstraintDef] = parse_decl_text(model_text).constraints
         model = MPDeclareModel.build(constraints)
         with self._lock:
             if model_id in self.models:

@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime, timedelta
 
 from governancekit.engine.decision import Decision
@@ -43,18 +44,30 @@ def precedence_def(activation: str, target: str, id: str, source: str) -> Constr
     )
 
 
+_ATTRIBUTE = re.compile(r"""(?:\b[ATB]\.|\b(?:same|different)\s+)([^\s()<>=!,"']+)""")
+
+
 def monitor(*constraints: str) -> TraceMonitor:
     """A monitor for constraints written as .decl lines, e.g. "Response[a, b] | | | 0,1,h".
-    The condition columns may be left out; the activities are declared automatically."""
+    The condition columns may be left out; the activities are declared automatically and
+    every attribute used in a condition is bound to all of them."""
     lines = [c if "|" in c else c + " | | |" for c in constraints]
-    activities = {
-        item.strip()
-        for line in lines
-        for item in line[line.index("[") + 1 : line.index("]")].split(",")
-        if not item.strip().isdigit()
-    }
-    text = "\n".join([f"activity {a}" for a in sorted(activities)] + lines)
-    return TraceMonitor(MPDeclareModel.build(parse_decl_text(text)))
+    activities = sorted(
+        {
+            item.strip()
+            for line in lines
+            for item in line[line.index("[") + 1 : line.index("]")].split(",")
+            if not item.strip().isdigit()
+        }
+    )
+    attributes = sorted(
+        {name for line in lines for name in _ATTRIBUTE.findall(line.split("|", 1)[1])}
+    )
+    declarations = [f"activity {a}" for a in activities]
+    if attributes:
+        declarations += [f"bind {a}: {', '.join(attributes)}" for a in activities]
+    text = "\n".join(declarations + lines)
+    return TraceMonitor(MPDeclareModel.build(parse_decl_text(text).constraints))
 
 
 def decision(monitor: TraceMonitor, activity: str, at=T0, **payload) -> Decision:

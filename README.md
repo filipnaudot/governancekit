@@ -28,6 +28,7 @@ GovernanceKit only decides; the agent does the waiting and retrying.
 ```
 activity verify_identity
 activity view_account
+bind verify_identity: method
 Precedence[verify_identity, view_account] | | T.method in (bankid, sms) | 0,10,m
 ```
 
@@ -60,6 +61,7 @@ from governancekit.engine import Event, MonitorRegistry
 MODEL = """
 activity verify_identity
 activity view_account
+bind verify_identity: method
 Precedence[verify_identity, view_account] | | T.method in (bankid, sms) | 0,10,m
 """
 

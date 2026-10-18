@@ -123,6 +123,8 @@ def _compile(text: str, with_target: bool) -> Callable[..., bool]:
     condition = FunctionType(module.co_consts[0], {"__builtins__": {}})
     condition.__doc__ = text  # original condition, for logs
     condition.source = source  # type: ignore[attr-defined]  # generated code, for debugging
+    condition.attributes = frozenset(parser.attributes)  # type: ignore[attr-defined]
+    condition.values = frozenset(parser.values)  # type: ignore[attr-defined]
     return condition
 
 
@@ -150,6 +152,10 @@ class Parser:
         self.pos = 0
         self.target_allowed = target_allowed
         self.target_used = False
+        # (side, name) of every reference; side is "a" (A.) or "t" (T./B.)
+        self.attributes: set[tuple[str, str]] = set()
+        # (side, name, value) for every literal an attribute is compared with
+        self.values: set[tuple[str, str, str | int | float]] = set()
 
     def peek(self, offset: int = 0) -> tuple[str, str]:
         i = self.pos + offset
@@ -227,18 +233,27 @@ class Parser:
             if self.at("not"):
                 self.pos += 1
                 op = "!="
-            return self.compare(left, op, repr(self.value()))
+            value = self.value()
+            self.values.add((*left, value))
+            return self.compare(left, op, repr(value))
         if self.at("in") or (
             self.at("not") and self.at("in", 1)
         ):  # A.x [not] in (a, b)
             op = "in" if self.at("in") else "not in"
             self.pos += 1 if op == "in" else 2
-            return self.compare(left, op, self.enumeration())
+            items = self.enumeration()
+            self.values.update((*left, item) for item in items)
+            # compiled to a frozenset constant
+            return self.compare(left, op, "{" + ", ".join(map(repr, items)) + "}")
         kind, op = self.peek()  # A.x > 5, A.x = T.y, ...
         if kind != "sym" or op not in _OPERATORS:
             raise self.error("expected an operator, 'is' or 'in'")
         self.pos += 1
-        return self.compare(left, "==" if op == "=" else op, self.operand())
+        right = self.operand()
+        if not isinstance(right, tuple):
+            self.values.add((*left, right))
+            right = repr(right)
+        return self.compare(left, "==" if op == "=" else op, right)
 
     def value(self) -> str:
         """A quoted string, or bare words up to and/or/a symbol/the end: `is on hold` -> 'on hold'."""
@@ -251,23 +266,21 @@ class Parser:
             raise self.error("expected a value")
         return " ".join(words)
 
-    def enumeration(self) -> str:
+    def enumeration(self) -> list[str]:
         self.expect("(")
         items = [self.value()]
         while self.at(","):
             self.pos += 1
             items.append(self.value())
         self.expect(")")
-        return (
-            "{" + ", ".join(repr(item) for item in items) + "}"
-        )  # compiled to a frozenset constant
+        return items
 
-    def operand(self) -> str | tuple[str, str]:
+    def operand(self) -> str | int | float | tuple[str, str]:
         """Right side of a comparison operator: another reference, a number, or a single value."""
         kind, value = self.peek()
         if kind == "str":
             self.pos += 1
-            return repr(value)
+            return value
         if kind != "word" or value.lower() in _KEYWORDS:
             raise self.error("expected a value")
         self.pos += 1
@@ -277,8 +290,8 @@ class Parser:
             number = int(value) if _INTEGER.fullmatch(value) else float(value)
             if not math.isfinite(number):
                 raise ConditionSyntaxError(f"number out of range: {value}")
-            return repr(number)
-        return repr(value)
+            return number
+        return value
 
     def ref(self, text: str) -> tuple[str, str]:
         """'A.org:group' -> ('a', 'org:group'). B. is an alias for T."""
@@ -289,6 +302,7 @@ class Parser:
                     f"{text!r}: T. can't be used in an activation condition"
                 )
             self.target_used = True
+        self.attributes.add((side, text[2:]))
         return side, text[2:]
 
     def attr(self, ref: tuple[str, str]) -> tuple[str, str]:
