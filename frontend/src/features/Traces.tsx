@@ -1,9 +1,10 @@
 // Ended traces, each with its final verdict and audit log. Running traces are
 // shown through their monitors, in Monitors.tsx.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { ApiError, apiFetch, errorMessage } from '../api'
 import { formatTime } from '../format'
+import { useUpdates } from '../updates'
 import { TraceAuditLog } from './Audit'
 import { useSession } from './Auth'
 
@@ -48,10 +49,8 @@ export function EndedTraceList() {
     [token, logOut],
   )
 
-  // Load when the component appears
-  useEffect(() => {
-    load()
-  }, [load])
+  // Load when the component appears, and again whenever a trace changes
+  useUpdates(token, load)
 
   function toggle(traceId: string) {
     setSelected((current) => (current === traceId ? null : traceId))
@@ -61,9 +60,6 @@ export function EndedTraceList() {
     <section className="card">
       <div className="card-header">
         <h2>Ended Traces</h2>
-        <button type="button" className="secondary" onClick={load}>
-          Refresh
-        </button>
       </div>
       {error && <p className="error">{error}</p>}
       {traces === null && !error && <p>Loading…</p>}

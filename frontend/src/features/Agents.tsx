@@ -47,9 +47,6 @@ export function AgentList() {
     <section className="card">
       <div className="card-header">
         <h2>Registered Agents</h2>
-        <button type="button" className="secondary" onClick={load}>
-          Refresh
-        </button>
       </div>
       {error && <p className="error">{error}</p>}
       {agents === null && !error && <p>Loading…</p>}

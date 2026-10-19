@@ -4,7 +4,8 @@ Trace monitoring for the GovernanceKit web server.
 TraceMonitors is the one place traces are started, worked on and ended. For
 every request it checks that the agent may work on the trace, asks the
 engine's trace monitor, and records the request in the trace's history. When
-the trace ends, its history is moved to the audit log.
+the trace ends, its history is moved to the audit log. After every change it
+tells the frontend's update streams.
 
 Admins list the trace monitors, one per running trace, with what each one
 keeps track of: the activities running on its trace and the constraints that
@@ -32,6 +33,7 @@ from governancekit.server.traces import (
     Trace,
     running_activity,
 )
+from governancekit.server.updates import FrontendTraceUpdates
 
 router = APIRouter(tags=["management"], dependencies=[Depends(require_admin)])
 
@@ -49,12 +51,16 @@ class TraceMonitors:
     Attributes:
         engine_monitor: The engine, with the models and a monitor per running trace.
         audit: Where the history of a trace is kept once it has ended.
+        updates: Told after every change, once the trace's lock is released.
         running_traces: The traces that have started and not yet ended.
     """
 
-    def __init__(self, engine_monitor: MonitorRegistry, audit: AuditLog):
+    def __init__(
+        self, engine_monitor: MonitorRegistry, audit: AuditLog, updates: FrontendTraceUpdates
+    ):
         self.engine_monitor = engine_monitor
         self.audit = audit
+        self.updates = updates
         self.running_traces = RunningTraces()
 
     def start_trace(self, model_id: str, agent_id: str) -> str:
@@ -77,6 +83,7 @@ class TraceMonitors:
         )
         self._record(trace, agent_id, Action.START_TRACE)
         self.running_traces.add(trace)
+        self.updates.notify()
         return trace_id
 
     def end_trace(self, trace_id: str, agent_id: str, abort_running: bool) -> list[str]:
@@ -110,6 +117,7 @@ class TraceMonitors:
             # trace is always found in one of them
             self.audit.add(trace, ended_at=datetime.now(UTC), violations=violations)
             self.running_traces.remove(trace_id)
+        self.updates.notify()
         return violations
 
     def check(
@@ -134,6 +142,7 @@ class TraceMonitors:
                 decision=decision,
                 violations=blocking,
             )
+        self.updates.notify()
         return decision, blocking
 
     def begin(
@@ -163,6 +172,7 @@ class TraceMonitors:
                 instance_id=instance_id,
                 violations=blocking,
             )
+        self.updates.notify()
         return decision, instance_id, blocking
 
     def finish(
@@ -194,6 +204,7 @@ class TraceMonitors:
                 instance_id=instance_id,
                 status=activity_status,
             )
+        self.updates.notify()
 
     def unfinished(self, trace_id: str, agent_id: str) -> dict[str, Event]:
         """
@@ -219,11 +230,13 @@ class TraceMonitors:
         try:
             with self._locked(trace_id) as trace:
                 trace.agent_ids.add(agent_id)
-                return set(trace.agent_ids)
+                agent_ids = set(trace.agent_ids)
         except KeyError:
             if self.audit.get(trace_id) is not None:
                 raise ValueError(f"Trace has ended: {trace_id!r}") from None
             raise
+        self.updates.notify()
+        return agent_ids
 
     def entries(self, trace_id: str) -> list[AuditEntry] | None:
         """A trace's history, running or ended, or None if it was never started."""

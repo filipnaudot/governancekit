@@ -1,3 +1,5 @@
+import asyncio
+import threading
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -5,6 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from governancekit.server import updates
 from governancekit.server.main import create_app
 
 JWT_SECRET = "test-jwt-secret-that-is-at-least-32-bytes"
@@ -648,3 +651,63 @@ def test_list_monitors_shows_running_traces_only(client, agent, agent_id):
 
 def test_listing_monitors_requires_admin(agent):
     assert agent.get("/monitors").status_code == 403
+
+
+# ---------- Live updates ----------
+
+
+def test_updates_stream_sends_event_on_connect(client, monkeypatch):
+    # Close the stream quickly, so the whole response can be read
+    monkeypatch.setattr(updates, "STREAM_LIFETIME", 0.1)
+    response = client.get("/updates")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.text.count("event: traces") == 1
+
+
+def test_updates_require_admin(agent):
+    assert agent.get("/updates").status_code == 403
+
+
+def test_trace_changes_notify_updates(app, client, agent):
+    notified = []
+    app.state.gk.frontend_updates.notify = lambda: notified.append(True)
+    trace_id = _start_trace(agent, _add_model(client, EXISTENCE_DECL))
+    assert len(notified) == 1
+    agent.post(f"/traces/{trace_id}/check", json={"activity": "login"})
+    assert len(notified) == 2
+    _complete(agent, trace_id, "login")  # begin and finish
+    assert len(notified) == 4
+    agent.post(f"/traces/{trace_id}/end")
+    assert len(notified) == 5
+
+
+def test_failed_request_does_not_notify_updates(app, agent):
+    notified = []
+    app.state.gk.frontend_updates.notify = lambda: notified.append(True)
+    agent.post("/traces/unknown/check", json={"activity": "login"})
+    assert notified == []
+
+
+def test_trace_updates_wakes_listener_from_other_thread():
+    trace_updates = updates.FrontendTraceUpdates()
+
+    async def listen() -> None:
+        with trace_updates.listen() as changed:
+            threading.Thread(target=trace_updates.notify).start()
+            await asyncio.wait_for(changed.wait(), timeout=1)
+
+    asyncio.run(listen())
+
+
+def test_trace_updates_forgets_listener_after_block():
+    trace_updates = updates.FrontendTraceUpdates()
+
+    async def listen() -> asyncio.Event:
+        with trace_updates.listen() as changed:
+            pass
+        trace_updates.notify()
+        await asyncio.sleep(0)
+        return changed
+
+    assert not asyncio.run(listen()).is_set()
