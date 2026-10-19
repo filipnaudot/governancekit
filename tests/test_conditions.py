@@ -71,3 +71,25 @@ def test_time_condition():
     assert not cond(A, make_event({}, seconds=30))
     assert not cond(A, make_event({}, seconds=301))
     assert cond.bounds == (timedelta(minutes=1), timedelta(minutes=5))  # type: ignore[attr-defined])
+
+
+def test_activation_condition_reports_attributes_and_values():
+    """Every referenced attribute, and every literal it is compared with, is reported."""
+    cond = create_activation_condition("A.grade > 90 and A.org:group in (G1, G2)")
+
+    assert cond.attributes == {("a", "grade"), ("a", "org:group")}
+    assert cond.values == {("a", "grade", 90), ("a", "org:group", "G1"), ("a", "org:group", "G2")}
+
+
+def test_correlation_condition_reports_both_sides():
+    """same/different and attribute comparisons report both sides but no values."""
+    cond = create_correlation_condition("same resource and A.grade < T.grade and T.x is y")
+
+    assert cond.attributes == {
+        ("a", "resource"),
+        ("t", "resource"),
+        ("a", "grade"),
+        ("t", "grade"),
+        ("t", "x"),
+    }
+    assert cond.values == {("t", "x", "y")}

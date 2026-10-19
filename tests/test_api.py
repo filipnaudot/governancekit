@@ -264,8 +264,11 @@ def test_add_model_returns_constraints(client):
     assert constraints[0]["activation_activity"] == "login"
 
 
-def test_add_invalid_model_returns_400(client):
-    response = client.post("/models", json={"decl": "Existence[login] |||"})
+@pytest.mark.parametrize(
+    "decl", ["Existence[login] |||", "activity a\nResponse[a, a]", "activity a\nFoo[a, a] |||"]
+)
+def test_add_invalid_model_returns_400(client, decl):
+    response = client.post("/models", json={"decl": decl})
 
     assert response.status_code == 400
 
