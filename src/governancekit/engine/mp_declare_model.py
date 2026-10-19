@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Self
 
+from governancekit.engine.event_schema import EventSchema
 from governancekit.engine.events import Event
 from governancekit.engine.templates import Template
 
@@ -60,9 +61,12 @@ class MPDeclareModel:
         str, tuple[int, ...]
     ]  # activity -> non-ordering constraints mentioning it
     ordering_constraints: tuple[int, ...]  # asked on every begin and finish
+    schema: EventSchema | None  # events are checked against it; None = not checked
 
     @classmethod
-    def build(cls, constraints: list[ConstraintDef]) -> Self:
+    def build(
+        cls, constraints: list[ConstraintDef], schema: EventSchema | None = None
+    ) -> Self:
         """Build a model and its lookups from parsed constraints."""
         begin_index: dict[str, list[int]] = defaultdict(list)
         finish_index: dict[str, list[int]] = defaultdict(list)
@@ -86,4 +90,5 @@ class MPDeclareModel:
             begin_index={k: tuple(v) for k, v in begin_index.items()},
             finish_index={k: tuple(v) for k, v in finish_index.items()},
             ordering_constraints=tuple(ordering_constraints),
+            schema=schema,
         )

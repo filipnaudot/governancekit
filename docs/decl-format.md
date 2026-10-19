@@ -17,7 +17,8 @@ Precedence[approve_refund, issue_refund] | A.amount > 10000 | different resource
   (in symmetric templates, the activation condition's attributes to both activities).
 - `attr: v1, v2, ...`, `attr: integer between X and Y` or `attr: float between X and Y`: optional domain of a
   bound attribute. Values in conditions must fit it (`A.status is resolvd` is an error).
-- Bindings and domains are checked when the model is loaded; payloads are not checked against them yet.
+- Bindings and domains are checked when the model is loaded. With `validate_payloads`, events must also
+  fit them: a declared activity, every bound attribute, values in their domain.
 - Declarations may appear anywhere in the file. `#` starts a comment, except inside quotes.
 - An invalid line is reported with its line number.
 

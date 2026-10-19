@@ -11,8 +11,9 @@ from datetime import datetime
 
 from governancekit.engine.decision import Decision
 from governancekit.engine.decl_parser import parse_decl_text
+from governancekit.engine.event_schema import EventSchema
 from governancekit.engine.events import Event
-from governancekit.engine.mp_declare_model import ConstraintDef, MPDeclareModel
+from governancekit.engine.mp_declare_model import MPDeclareModel
 from governancekit.engine.trace_monitor import TraceMonitor
 
 
@@ -46,7 +47,9 @@ class MonitorRegistry:
         self._lock = threading.Lock()  # guards models, monitors and _trace_locks
         self._trace_locks: dict[str, threading.Lock] = {}
 
-    def add_model(self, model_id: str, model_text: str) -> None:
+    def add_model(
+        self, model_id: str, model_text: str, validate_payloads: bool = False
+    ) -> None:
         """
         Add a model to the monitor registry.
 
@@ -55,13 +58,21 @@ class MonitorRegistry:
         Args:
             model_id: Unique key for the model.
             model_text: Model definition in MP-DECLARE syntax.
+            validate_payloads: Reject events whose activity is not declared, or
+                               whose payload lacks a bound attribute or has a
+                               value outside its domain.
 
         Raises:
             ValueError: If model_id is already registered or syntax error in
                         model definition.
         """
-        constraints: list[ConstraintDef] = parse_decl_text(model_text).constraints
-        model = MPDeclareModel.build(constraints)
+        parsed = parse_decl_text(model_text)
+        schema = (
+            EventSchema(parsed.activities, parsed.bindings, parsed.domains)
+            if validate_payloads
+            else None
+        )
+        model = MPDeclareModel.build(parsed.constraints, schema)
         with self._lock:
             if model_id in self.models:
                 raise ValueError(f"Model id {model_id!r} is already registered.")
@@ -146,6 +157,8 @@ class MonitorRegistry:
 
         Raises:
             KeyError: If trace_id is not being monitored.
+            InvalidEventError: If the model validates payloads and the event
+                               doesn't fit; nothing is reserved.
         """
         monitor, lock = self._monitor(trace_id)
         with lock:
@@ -198,6 +211,8 @@ class MonitorRegistry:
 
         Raises:
             KeyError: If trace_id is not being monitored.
+            InvalidEventError: If the model validates payloads and the event
+                               doesn't fit.
         """
         monitor, lock = self._monitor(trace_id)
         with lock:

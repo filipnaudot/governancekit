@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 import pytest
 
 from governancekit.engine.decision import Decision
+from governancekit.engine.event_schema import InvalidEventError
 from governancekit.engine.events import Event
 from governancekit.engine.monitor_registry import MonitorRegistry
 
@@ -121,3 +122,32 @@ def test_concurrent_end_succeeds_once(registry):
         thread.join()
 
     assert sorted(results) == ["KeyError", "KeyError", "KeyError", "ended"]
+
+
+BOUND_MODEL = """
+    activity refund
+    bind refund: amount
+    amount: integer between 0 and 100
+"""
+
+
+def test_validating_model_rejects_invalid_events_and_reserves_nothing():
+    registry = MonitorRegistry()
+    registry.add_model("model", BOUND_MODEL, validate_payloads=True)
+    registry.start_monitor("model", "trace")
+
+    with pytest.raises(InvalidEventError):
+        registry.check_event(
+            "trace", Event("refund", datetime.now(UTC), {"amount": 500})
+        )
+    with pytest.raises(InvalidEventError):
+        registry.begin_event("trace", _event("refund"))
+    assert registry.unfinished("trace") == {}
+
+
+def test_payloads_are_not_validated_by_default():
+    registry = MonitorRegistry()
+    registry.add_model("model", BOUND_MODEL)
+    registry.start_monitor("model", "trace")
+
+    assert registry.begin_event("trace", _event("undeclared"))[0] is Decision.ALLOWED

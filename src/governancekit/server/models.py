@@ -21,6 +21,11 @@ router = APIRouter(tags=["management"], dependencies=[Depends(require_admin)])
 
 class AddModelRequest(BaseModel):
     decl: str = Field(description="MP-DECLARE model as .decl text")
+    validate_payloads: bool = Field(
+        default=False,
+        description="Reject events with an undeclared activity, a missing bound"
+        " attribute or a value outside its domain (422)",
+    )
 
 
 class AddModelResponse(BaseModel):
@@ -30,6 +35,7 @@ class AddModelResponse(BaseModel):
 class ModelInfo(BaseModel):
     model_id: str
     constraint_count: int
+    validate_payloads: bool
 
 
 class ModelListResponse(BaseModel):
@@ -52,7 +58,11 @@ def add_model(
     """Register an MP-Declare model and return its generated ID."""
     model_id = str(uuid.uuid4())
     try:
-        state.engine_monitor.add_model(model_id=model_id, model_text=body.decl)
+        state.engine_monitor.add_model(
+            model_id=model_id,
+            model_text=body.decl,
+            validate_payloads=body.validate_payloads,
+        )
     except ValueError as e:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"Unable to add model: {e}"
@@ -67,7 +77,11 @@ def list_models(state: Annotated[ServerState, Depends(get_state)]) -> ModelListR
     """Admin endpoint. Returns the known models."""
     return ModelListResponse(
         models=[
-            ModelInfo(model_id=model_id, constraint_count=len(model.constraints))
+            ModelInfo(
+                model_id=model_id,
+                constraint_count=len(model.constraints),
+                validate_payloads=model.schema is not None,
+            )
             for model_id, model in state.engine_monitor.models.items()
         ]
     )

@@ -17,8 +17,8 @@ A model is built once and shared by its traces; all state that changes lives in 
 ### From .decl text to a model
 
 1. `decl_parser.parse_decl_text` finds each constraint's template, activities and count, and checks the
-   conditions against the `bind` and domain lines. It returns these too (`ParsedDecl`), for later
-   payload checks.
+   conditions against the `bind` and domain lines. It returns these too (`ParsedDecl`); with
+   `validate_payloads` they become the model's `EventSchema` (`event_schema.py`).
 2. `conditions` compiles the condition fields once into plain functions: `f(A)` for activation, `f(A, T)`
    for correlation and time.
 3. Each constraint becomes a frozen `ConstraintDef`; its `source` (the original line) is what `blocking`
@@ -36,7 +36,8 @@ A model is built once and shared by its traces; all state that changes lives in 
 `TraceMonitor` (one per trace) holds the constraint instances and `running` (activity → {instance id →
 event}).
 
-- **check / begin**: ask `begin_index[activity] + ordering_constraints`. Strictest answer wins (DENIED >
+- **check / begin**: if the model has a schema, an event that doesn't fit it raises `InvalidEventError`.
+  Then ask `begin_index[activity] + ordering_constraints`. Strictest answer wins (DENIED >
   WAIT > ALLOWED); the non-allowing ones are returned as `blocking`. If allowed, begin adds the event to
   `running` under a new instance id.
 - **finish**: removes the activity from `running`. Only if it completed, `on_finish` is called on

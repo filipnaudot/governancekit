@@ -11,31 +11,13 @@ from governancekit.engine.conditions import (
     create_correlation_condition,
     create_time_condition,
 )
+from governancekit.engine.event_schema import Domain, EnumDomain, RangeDomain
 from governancekit.engine.mp_declare_model import ConstraintDef
 from governancekit.engine.templates import Template
 
 
 class DeclSyntaxError(ValueError):
     """The .decl text is not valid MP-DECLARE"""
-
-
-@dataclass(frozen=True, slots=True)
-class EnumDomain:
-    """attribute: v1, v2, ..."""
-
-    values: frozenset[str]
-
-
-@dataclass(frozen=True, slots=True)
-class RangeDomain:
-    """attribute: integer between low and high, or float between low and high"""
-
-    type: type[int] | type[float]
-    low: int | float
-    high: int | float
-
-
-Domain = EnumDomain | RangeDomain
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +127,7 @@ def parse_decl_text(text: str) -> ParsedDecl:
                             line, len(constraints), activities, bindings, domains
                         )
                     )
-            except ValueError as e:
+            except (ValueError, TypeError) as e:
                 raise DeclSyntaxError(f"line {line_no}: {e} in {line!r}") from e
 
     return ParsedDecl(
@@ -302,7 +284,9 @@ def _check_conditions(
     and every value it is compared with must fit the attribute's domain."""
     activation, target = definition.activation_activity, definition.target_activity
     activation_sides = {
-        "a": (activation, target) if definition.template in _SYMMETRIC else (activation,)
+        "a": (activation, target)
+        if definition.template in _SYMMETRIC
+        else (activation,)
     }
     correlation_sides = {"a": (activation,), "t": (target,)}
 
@@ -322,12 +306,12 @@ def _check_conditions(
             _check_value(name, value, domains.get(name))
 
 
-def _check_value(name: str, value: str | int | float, domain: Domain | None) -> None:
+def _check_value(name: str, value: str | float, domain: Domain | None) -> None:
     # is/in compare text, so enum values are compared as text
     if isinstance(domain, EnumDomain) and str(value) not in domain.values:
         raise ValueError(f"{value!r} is not in the domain of {name!r}")
     if isinstance(domain, RangeDomain) and isinstance(value, str):
-        raise ValueError(f"{name!r} is a number, got {value!r}")
+        raise TypeError(f"{name!r} is a number, got {value!r}")
 
 
 def _require_declared_activity(activity: str, activities: set[str]) -> str:
